@@ -157,11 +157,11 @@ def train(
             learning_rate=learning_rate,
             buffer_size=500_000,
             learning_starts=500,
-            batch_size=256,  # Smaller batch for more frequent updates
+            batch_size=4096,  # Large batch for GPU utilization
             tau=0.005,
             gamma=0.99,
             train_freq=1,
-            gradient_steps=1,  # One update per step for stability
+            gradient_steps=4,  # Multiple updates per step for GPU utilization
             ent_coef="auto",
             policy_kwargs=sac_policy_kwargs,
             tensorboard_log=str(log_path),
