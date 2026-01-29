@@ -17,6 +17,12 @@ The agent learns to shoot balls into the HUB target from any position in the all
 - Field: 16.5m x 8.2m
 - Alliance zone depth: 5m
 
+## Documentation
+
+- [Training Guide](docs/training.md) - How to train models, CLI options, troubleshooting
+- [Environment Design](docs/gym.md) - Gymnasium environment architecture and usage
+- [RL Algorithms](docs/rl.md) - Beginner-friendly guide to reinforcement learning and PPO/DQN/SAC
+
 ## Installation
 
 ```bash
