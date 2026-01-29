@@ -5,6 +5,11 @@ import numpy as np
 # Physics
 GRAVITY = 9.81  # m/s^2
 
+# Air resistance parameters
+AIR_DENSITY = 1.225           # kg/m³ (at sea level, 15°C)
+DRAG_COEFFICIENT = 0.47       # dimensionless (sphere)
+BALL_MASS = 0.27              # kg (typical FRC cargo ball)
+
 # Field dimensions (meters)
 FIELD_LENGTH = 16.5  # 54 feet
 FIELD_WIDTH = 8.2    # 27 feet

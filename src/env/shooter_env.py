@@ -43,10 +43,11 @@ class ShooterEnv(gym.Env):
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
-    def __init__(self, render_mode=None):
+    def __init__(self, render_mode=None, air_resistance: bool = False):
         super().__init__()
 
         self.render_mode = render_mode
+        self.air_resistance = air_resistance
 
         # Action space: discrete (velocity x angle grid)
         self.action_space = spaces.Discrete(VELOCITY_BINS * ANGLE_BINS)
@@ -118,7 +119,7 @@ class ShooterEnv(gym.Env):
         velocity, angle = action_to_velocity_angle(action)
 
         # Compute trajectory
-        result = compute_trajectory(velocity, angle, self.distance_to_hub)
+        result = compute_trajectory(velocity, angle, self.distance_to_hub, air_resistance=self.air_resistance)
 
         # Store for rendering
         self.last_trajectory = result
@@ -188,10 +189,11 @@ class ShooterEnv3D(gym.Env):
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
-    def __init__(self, render_mode=None):
+    def __init__(self, render_mode=None, air_resistance: bool = False):
         super().__init__()
 
         self.render_mode = render_mode
+        self.air_resistance = air_resistance
 
         # Action space: discrete (velocity x elevation x azimuth grid)
         # 10 x 15 x 180 = 27,000 actions
@@ -274,6 +276,7 @@ class ShooterEnv3D(gym.Env):
             azimuth=azimuth,
             target_distance=self.distance_to_hub,
             target_bearing=self.bearing_to_hub,
+            air_resistance=self.air_resistance,
         )
 
         # Store for rendering
