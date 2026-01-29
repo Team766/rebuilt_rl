@@ -25,6 +25,7 @@ python scripts/train.py --algorithm SAC --env-type continuous
 | `--seed` | 42 | Random seed for reproducibility |
 | `--save-dir` | models | Directory to save trained models |
 | `--log-dir` | logs | Directory for TensorBoard logs |
+| `--air-resistance` | off | Enable air resistance in physics simulation |
 
 ## Recommended Configurations
 
@@ -58,6 +59,17 @@ python scripts/train.py \
 ```
 
 Uses discrete action space for velocity, elevation, and azimuth. Requires more training due to large action space (27,000 actions).
+
+### With Air Resistance (More Realistic)
+```bash
+python scripts/train.py \
+    --algorithm SAC \
+    --env-type continuous \
+    --timesteps 30000 \
+    --air-resistance
+```
+
+Enables drag force simulation for more realistic ball trajectories. Air resistance reduces trajectory height by 1-6% depending on velocity and angle. Models trained with air resistance will be more accurate on real robots.
 
 ## Understanding Training Output
 
