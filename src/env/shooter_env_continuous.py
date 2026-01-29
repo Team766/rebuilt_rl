@@ -39,10 +39,11 @@ class ShooterEnvContinuous(gym.Env):
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
-    def __init__(self, render_mode=None, shots_per_episode: int = 50):
+    def __init__(self, render_mode=None, shots_per_episode: int = 50, air_resistance: bool = False):
         super().__init__()
 
         self.shots_per_episode = shots_per_episode
+        self.air_resistance = air_resistance
 
         self.render_mode = render_mode
 
@@ -148,6 +149,7 @@ class ShooterEnvContinuous(gym.Env):
             azimuth=azimuth,
             target_distance=self.distance_to_hub,
             target_bearing=self.bearing_to_hub,
+            air_resistance=self.air_resistance,
         )
 
         self.last_trajectory = result

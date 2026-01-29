@@ -206,6 +206,49 @@ A shot is a "hit" if:
 
 The descending requirement prevents unrealistic flat shots.
 
+### Air Resistance (Optional)
+
+By default, the physics simulation uses ideal projectile motion (no air resistance). For more realistic simulations, air resistance can be enabled:
+
+```python
+# Enable air resistance
+env = ShooterEnvContinuous(air_resistance=True)
+```
+
+When enabled, the simulation includes drag force:
+
+```
+F_drag = 0.5 × ρ × v² × Cd × A
+
+Where:
+  ρ  = air density (1.225 kg/m³)
+  v  = ball velocity
+  Cd = drag coefficient (0.47 for a sphere)
+  A  = cross-sectional area (π × radius²)
+```
+
+**Effect on trajectories:**
+- Reduces maximum height by 1-6%
+- Reduces range slightly
+- More pronounced at lower velocities (ball spends more time in air)
+- More pronounced at steeper angles
+
+| Velocity | Angle | Height Reduction |
+|----------|-------|------------------|
+| 10 m/s | 45° | ~3.7% |
+| 15 m/s | 45° | ~1.4% |
+| 20 m/s | 45° | ~0.7% |
+
+**When to use air resistance:**
+- Training models for real robot deployment
+- When accuracy at long range matters
+- For more challenging training scenarios
+
+**When to skip air resistance:**
+- Initial prototyping and testing
+- When training speed is priority
+- For simpler demonstrations
+
 ## Reset Behavior
 
 ```python
@@ -248,6 +291,11 @@ AZIMUTH_MIN_DEG, AZIMUTH_MAX_DEG = -90.0, 90.0
 REWARD_HIT_BASE = 1.0
 REWARD_HIT_CENTER = 1.0
 REWARD_MISS_SCALE = -0.5
+
+# Air resistance (optional)
+AIR_DENSITY = 1.225        # kg/m³
+DRAG_COEFFICIENT = 0.47    # sphere
+BALL_MASS = 0.27           # kg
 ```
 
 ## Using the Environment

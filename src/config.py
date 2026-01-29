@@ -5,6 +5,11 @@ import numpy as np
 # Physics
 GRAVITY = 9.81  # m/s^2
 
+# Air resistance parameters
+AIR_DENSITY = 1.225           # kg/m³ (at sea level, 15°C)
+DRAG_COEFFICIENT = 0.47       # dimensionless (sphere)
+BALL_MASS = 0.215             # kg (spec: 0.203-0.227 kg / 0.448-0.500 lb)
+
 # Field dimensions (meters)
 FIELD_LENGTH = 16.5  # 54 feet
 FIELD_WIDTH = 8.2    # 27 feet
@@ -19,8 +24,9 @@ HUB_OPENING_HEIGHT = 1.83      # 72 inches - center height of opening
 HUB_OPENING_WIDTH = 1.06       # 41.7 inches - hexagonal opening width
 HUB_OPENING_HALF_WIDTH = HUB_OPENING_WIDTH / 2  # 0.53m
 
-# Ball (FUEL)
-BALL_DIAMETER = 0.15   # 5.91 inches
+# Ball (FUEL) - per game manual, AndyMark am-5801
+# 5.91in (15.0cm) diameter high density foam ball
+BALL_DIAMETER = 0.150  # 15.0 cm / 5.91 inches
 BALL_RADIUS = BALL_DIAMETER / 2  # 0.075m
 
 # Robot

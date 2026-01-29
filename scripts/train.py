@@ -25,15 +25,15 @@ from src.env.shooter_env import ShooterEnv, ShooterEnv3D
 from src.env.shooter_env_continuous import ShooterEnvContinuous
 
 
-def make_env(seed: int = 0, env_type: str = "2d"):
+def make_env(seed: int = 0, env_type: str = "2d", air_resistance: bool = False):
     """Create a single environment instance."""
     def _init():
         if env_type == "3d":
-            env = ShooterEnv3D()
+            env = ShooterEnv3D(air_resistance=air_resistance)
         elif env_type == "continuous":
-            env = ShooterEnvContinuous()
+            env = ShooterEnvContinuous(air_resistance=air_resistance)
         else:
-            env = ShooterEnv()
+            env = ShooterEnv(air_resistance=air_resistance)
         env = Monitor(env)
         env.reset(seed=seed)
         return env
@@ -53,6 +53,7 @@ def train(
     learning_rate: float = 3e-4,
     verbose: int = 1,
     env_type: str = "2d",
+    air_resistance: bool = False,
 ):
     """Train the RL agent.
 
@@ -69,6 +70,7 @@ def train(
         learning_rate: Learning rate
         verbose: Verbosity level
         env_type: "2d" for original env, "3d" for turret aiming
+        air_resistance: Whether to enable air resistance in physics
     """
     # Set seeds
     torch.manual_seed(seed)
@@ -85,17 +87,18 @@ def train(
 
     print(f"Training {algorithm} for {total_timesteps:,} timesteps")
     print(f"Environment: {env_type.upper()}")
+    print(f"Air resistance: {'ON' if air_resistance else 'OFF'}")
     print(f"Save path: {save_path}")
     print(f"Log path: {log_path}")
 
     # Create vectorized training environment
     if n_envs > 1:
-        env = SubprocVecEnv([make_env(seed + i, env_type) for i in range(n_envs)])
+        env = SubprocVecEnv([make_env(seed + i, env_type, air_resistance) for i in range(n_envs)])
     else:
-        env = DummyVecEnv([make_env(seed, env_type)])
+        env = DummyVecEnv([make_env(seed, env_type, air_resistance)])
 
     # Create evaluation environment
-    eval_env = DummyVecEnv([make_env(seed + 1000, env_type)])
+    eval_env = DummyVecEnv([make_env(seed + 1000, env_type, air_resistance)])
 
     # Create model - check for available GPU memory
     device = "cpu"
@@ -154,11 +157,11 @@ def train(
             learning_rate=learning_rate,
             buffer_size=500_000,
             learning_starts=500,
-            batch_size=256,  # Smaller batch for more frequent updates
+            batch_size=4096,  # Large batch for GPU utilization
             tau=0.005,
             gamma=0.99,
             train_freq=1,
-            gradient_steps=1,  # One update per step for stability
+            gradient_steps=4,  # Multiple updates per step for GPU utilization
             ent_coef="auto",
             policy_kwargs=sac_policy_kwargs,
             tensorboard_log=str(log_path),
@@ -294,6 +297,11 @@ def main():
         choices=["2d", "3d", "continuous"],
         help="Environment type: 2d, 3d (discrete turret), or continuous (continuous actions)",
     )
+    parser.add_argument(
+        "--air-resistance",
+        action="store_true",
+        help="Enable air resistance in physics simulation",
+    )
 
     args = parser.parse_args()
 
@@ -308,6 +316,7 @@ def main():
         eval_freq=args.eval_freq,
         verbose=args.verbose,
         env_type=args.env_type,
+        air_resistance=args.air_resistance,
     )
 
 

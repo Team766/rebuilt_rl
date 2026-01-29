@@ -11,6 +11,9 @@ from ..config import (
     HUB_ENTRY_MIN,
     HUB_ENTRY_MAX,
     BALL_RADIUS,
+    AIR_DENSITY,
+    DRAG_COEFFICIENT,
+    BALL_MASS,
 )
 
 
@@ -48,6 +51,7 @@ def compute_trajectory(
     angle: float,
     target_distance: float,
     dt: float = 0.001,
+    air_resistance: bool = False,
 ) -> TrajectoryResult:
     """Compute 2D projectile trajectory and check if it enters the HUB.
 
@@ -56,6 +60,7 @@ def compute_trajectory(
         angle: Launch angle in radians (from horizontal)
         target_distance: Distance to target (HUB) in meters
         dt: Time step for trajectory computation
+        air_resistance: Whether to include air resistance (drag)
 
     Returns:
         TrajectoryResult with hit status, heights, and trajectory data
@@ -65,6 +70,12 @@ def compute_trajectory(
     vy = velocity * np.sin(angle)
     x = 0.0
     y = LAUNCH_HEIGHT
+
+    # Air resistance coefficient: k = 0.5 * rho * Cd * A / m
+    # where A = pi * r^2 (cross-sectional area)
+    if air_resistance:
+        cross_section = np.pi * BALL_RADIUS**2
+        drag_coeff = 0.5 * AIR_DENSITY * DRAG_COEFFICIENT * cross_section / BALL_MASS
 
     # Store trajectory points
     xs = [x]
@@ -82,20 +93,47 @@ def compute_trajectory(
     prev_vy = vy
 
     while y >= 0 and x <= max_x:
-        # Update position
-        x += vx * dt
-        y += vy * dt - 0.5 * GRAVITY * dt**2
+        if air_resistance:
+            # Compute velocity magnitude
+            v_mag = np.sqrt(vx**2 + vy**2)
 
-        # Update velocity (only y changes due to gravity)
-        vy -= GRAVITY * dt
+            # Drag acceleration (opposes velocity direction)
+            # a_drag = -k * v * v_hat = -k * v^2 * (v/|v|) = -k * |v| * v
+            if v_mag > 0:
+                ax_drag = -drag_coeff * v_mag * vx
+                ay_drag = -drag_coeff * v_mag * vy
+            else:
+                ax_drag = 0.0
+                ay_drag = 0.0
+
+            # Update velocities with drag and gravity
+            vx += ax_drag * dt
+            vy += (ay_drag - GRAVITY) * dt
+
+            # Update position
+            x += vx * dt
+            y += vy * dt
+        else:
+            # Simple projectile motion (no air resistance)
+            # Update position
+            x += vx * dt
+            y += vy * dt - 0.5 * GRAVITY * dt**2
+
+            # Update velocity (only y changes due to gravity)
+            vy -= GRAVITY * dt
 
         # Check if we're crossing the target distance
         if prev_x < target_distance <= x and height_at_target is None:
             # Interpolate to find exact height at target
             if vx > 0:
                 t_cross = (target_distance - prev_x) / vx
-                height_at_target = prev_y + prev_vy * t_cross - 0.5 * GRAVITY * t_cross**2
-                vy_at_target = prev_vy - GRAVITY * t_cross
+                if air_resistance:
+                    # With drag, use linear interpolation (small dt approximation)
+                    height_at_target = prev_y + prev_vy * t_cross
+                    vy_at_target = prev_vy + (vy - prev_vy) * (t_cross / dt) if dt > 0 else vy
+                else:
+                    height_at_target = prev_y + prev_vy * t_cross - 0.5 * GRAVITY * t_cross**2
+                    vy_at_target = prev_vy - GRAVITY * t_cross
             else:
                 height_at_target = prev_y
                 vy_at_target = prev_vy
@@ -185,6 +223,7 @@ def compute_trajectory_3d(
     target_distance: float,
     target_bearing: float,
     dt: float = 0.001,
+    air_resistance: bool = False,
 ) -> TrajectoryResult3D:
     """Compute 3D projectile trajectory with azimuth aiming.
 
@@ -198,12 +237,13 @@ def compute_trajectory_3d(
         target_distance: Distance to target (HUB) in meters
         target_bearing: Bearing to target in radians (what azimuth should be)
         dt: Time step for trajectory computation
+        air_resistance: Whether to include air resistance (drag)
 
     Returns:
         TrajectoryResult3D with hit status and 3D miss information
     """
     # Compute 2D trajectory (elevation plane)
-    result_2d = compute_trajectory(velocity, elevation, target_distance, dt)
+    result_2d = compute_trajectory(velocity, elevation, target_distance, dt, air_resistance)
 
     # Compute azimuth error and lateral offset
     azimuth_error = azimuth - target_bearing
