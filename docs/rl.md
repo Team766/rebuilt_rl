@@ -174,6 +174,394 @@ from stable_baselines3 import SAC
 model = SAC("MlpPolicy", env, learning_rate=3e-4)
 ```
 
+## SAC Training Loop: Annotated Code Walkthrough
+
+This section walks through a simplified SAC training loop step-by-step. Understanding this helps demystify what happens when you call `model.learn()`.
+
+### Overview: SAC's Neural Networks
+
+SAC uses **five** neural networks:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        SAC Architecture                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ACTOR (Policy Network)                                         │
+│  ┌─────────────┐                                                │
+│  │ state ──────┼──► [mean, std] ──► sample action               │
+│  └─────────────┘                                                │
+│                                                                 │
+│  CRITICS (Q-Networks) - Two of them for stability               │
+│  ┌─────────────┐         ┌─────────────┐                        │
+│  │ state ──────┼──► Q1   │ state ──────┼──► Q2                  │
+│  │ action ─────┤         │ action ─────┤                        │
+│  └─────────────┘         └─────────────┘                        │
+│                                                                 │
+│  TARGET CRITICS - Slowly updated copies for stable learning     │
+│  ┌─────────────┐         ┌─────────────┐                        │
+│  │ Q1_target   │         │ Q2_target   │                        │
+│  └─────────────┘         └─────────────┘                        │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### The Complete Training Loop
+
+```python
+import torch
+import torch.nn.functional as F
+import numpy as np
+from collections import deque
+import random
+
+# =============================================================================
+# STEP 1: INITIALIZE NETWORKS AND REPLAY BUFFER
+# =============================================================================
+
+class ReplayBuffer:
+    """Stores past experiences for learning.
+
+    Why? Learning from random past experiences (not just recent ones)
+    breaks correlations and stabilizes training.
+    """
+    def __init__(self, capacity=100000):
+        self.buffer = deque(maxlen=capacity)
+
+    def push(self, state, action, reward, next_state, done):
+        """Store one experience tuple."""
+        self.buffer.append((state, action, reward, next_state, done))
+
+    def sample(self, batch_size):
+        """Randomly sample a batch of experiences."""
+        batch = random.sample(self.buffer, batch_size)
+        states, actions, rewards, next_states, dones = zip(*batch)
+        return (
+            torch.FloatTensor(states),
+            torch.FloatTensor(actions),
+            torch.FloatTensor(rewards).unsqueeze(1),
+            torch.FloatTensor(next_states),
+            torch.FloatTensor(dones).unsqueeze(1)
+        )
+
+# Initialize networks (simplified - real implementation uses nn.Module classes)
+# Actor: outputs mean and std of action distribution
+# Critics: output Q-value for state-action pair
+
+actor = ActorNetwork(state_dim=2, action_dim=3)      # Policy
+critic1 = CriticNetwork(state_dim=2, action_dim=3)   # Q-function 1
+critic2 = CriticNetwork(state_dim=2, action_dim=3)   # Q-function 2
+
+# Target networks start as copies of critics
+target_critic1 = copy.deepcopy(critic1)
+target_critic2 = copy.deepcopy(critic2)
+
+# Entropy coefficient (controls exploration)
+# "auto" means we learn this too!
+log_alpha = torch.zeros(1, requires_grad=True)  # learnable
+target_entropy = -3.0  # target entropy = -action_dim
+
+# Optimizers
+actor_optimizer = torch.optim.Adam(actor.parameters(), lr=3e-4)
+critic1_optimizer = torch.optim.Adam(critic1.parameters(), lr=3e-4)
+critic2_optimizer = torch.optim.Adam(critic2.parameters(), lr=3e-4)
+alpha_optimizer = torch.optim.Adam([log_alpha], lr=3e-4)
+
+replay_buffer = ReplayBuffer(capacity=500000)
+
+# =============================================================================
+# STEP 2: COLLECT EXPERIENCE (The "Rollout" Phase)
+# =============================================================================
+
+def collect_experience(env, actor, num_steps=1):
+    """
+    Interact with environment and store experiences.
+
+    This is where the agent actually takes shots!
+    """
+    state, info = env.reset()
+
+    for _ in range(num_steps):
+        # Actor outputs a probability distribution over actions
+        # We SAMPLE from it (not take the mean) for exploration
+        with torch.no_grad():
+            state_tensor = torch.FloatTensor(state).unsqueeze(0)
+
+            # Actor outputs mean and log_std of Gaussian distribution
+            mean, log_std = actor(state_tensor)
+            std = log_std.exp()
+
+            # Sample action from Gaussian: action = mean + std * noise
+            noise = torch.randn_like(mean)
+            action = mean + std * noise
+
+            # Squash to [-1, 1] using tanh (keeps actions bounded)
+            action = torch.tanh(action)
+
+        # Execute action in environment (take the shot!)
+        action_np = action.squeeze().numpy()
+        next_state, reward, terminated, truncated, info = env.step(action_np)
+        done = terminated or truncated
+
+        # Store experience in replay buffer
+        # This is the "memory" that allows off-policy learning
+        replay_buffer.push(state, action_np, reward, next_state, done)
+
+        state = next_state if not done else env.reset()[0]
+
+    return replay_buffer
+
+# =============================================================================
+# STEP 3: UPDATE CRITICS (Learn to evaluate actions)
+# =============================================================================
+
+def update_critics(batch_size=256, gamma=0.99):
+    """
+    Train critics to accurately predict Q-values.
+
+    Q(s,a) should equal: reward + γ * Q(next_state, next_action)
+
+    This is the "Bellman equation" - the foundation of Q-learning.
+    """
+    # Sample random batch from replay buffer
+    states, actions, rewards, next_states, dones = replay_buffer.sample(batch_size)
+
+    alpha = log_alpha.exp()  # Current entropy coefficient
+
+    # --- Compute target Q-value ---
+    with torch.no_grad():
+        # Ask actor: "What would you do in the next state?"
+        next_mean, next_log_std = actor(next_states)
+        next_std = next_log_std.exp()
+        noise = torch.randn_like(next_mean)
+        next_actions = torch.tanh(next_mean + next_std * noise)
+
+        # Compute log probability of next actions (for entropy bonus)
+        next_log_prob = compute_log_prob(next_mean, next_log_std, next_actions)
+
+        # Ask TARGET critics: "How good is that next action?"
+        # Use MINIMUM of two critics (prevents overestimation)
+        target_q1 = target_critic1(next_states, next_actions)
+        target_q2 = target_critic2(next_states, next_actions)
+        target_q = torch.min(target_q1, target_q2)
+
+        # Bellman target with entropy bonus
+        # "soft" Q includes entropy: we want high reward AND high randomness
+        target_q = rewards + gamma * (1 - dones) * (target_q - alpha * next_log_prob)
+
+    # --- Update Critic 1 ---
+    current_q1 = critic1(states, actions)
+    critic1_loss = F.mse_loss(current_q1, target_q)  # Mean squared error
+
+    critic1_optimizer.zero_grad()
+    critic1_loss.backward()
+    critic1_optimizer.step()
+
+    # --- Update Critic 2 ---
+    current_q2 = critic2(states, actions)
+    critic2_loss = F.mse_loss(current_q2, target_q)
+
+    critic2_optimizer.zero_grad()
+    critic2_loss.backward()
+    critic2_optimizer.step()
+
+    return critic1_loss.item(), critic2_loss.item()
+
+# =============================================================================
+# STEP 4: UPDATE ACTOR (Learn to take better actions)
+# =============================================================================
+
+def update_actor(batch_size=256):
+    """
+    Train actor to output actions that critics rate highly.
+
+    Actor's goal: maximize Q(state, actor(state)) + entropy
+
+    The entropy term encourages exploration - don't be too confident!
+    """
+    states, _, _, _, _ = replay_buffer.sample(batch_size)
+
+    alpha = log_alpha.exp()
+
+    # Get actions from current policy
+    mean, log_std = actor(states)
+    std = log_std.exp()
+    noise = torch.randn_like(mean)
+    actions = torch.tanh(mean + std * noise)
+
+    # Compute log probability (measures how "confident" the policy is)
+    log_prob = compute_log_prob(mean, log_std, actions)
+
+    # Ask critics: "How good are these actions?"
+    q1 = critic1(states, actions)
+    q2 = critic2(states, actions)
+    min_q = torch.min(q1, q2)  # Conservative estimate
+
+    # Actor loss: we MINIMIZE this, so we MAXIMIZE (Q - alpha * log_prob)
+    # - Maximize Q: take actions critics like
+    # - Maximize entropy (-log_prob): stay exploratory
+    actor_loss = (alpha * log_prob - min_q).mean()
+
+    actor_optimizer.zero_grad()
+    actor_loss.backward()
+    actor_optimizer.step()
+
+    return actor_loss.item(), log_prob.mean().item()
+
+# =============================================================================
+# STEP 5: UPDATE ENTROPY COEFFICIENT (Auto-tune exploration)
+# =============================================================================
+
+def update_alpha(log_prob):
+    """
+    Automatically adjust exploration level.
+
+    If entropy is too low (policy too confident), increase alpha.
+    If entropy is too high (policy too random), decrease alpha.
+
+    This is what "auto" entropy coefficient does.
+    """
+    # Target: maintain entropy around target_entropy
+    alpha_loss = -(log_alpha * (log_prob + target_entropy).detach()).mean()
+
+    alpha_optimizer.zero_grad()
+    alpha_loss.backward()
+    alpha_optimizer.step()
+
+    return log_alpha.exp().item()
+
+# =============================================================================
+# STEP 6: UPDATE TARGET NETWORKS (Slow tracking for stability)
+# =============================================================================
+
+def update_targets(tau=0.005):
+    """
+    Slowly update target networks toward current networks.
+
+    Why not just copy? Sudden changes destabilize learning.
+    Slow updates (τ=0.005 means 0.5% per update) keep things stable.
+
+    target = τ * current + (1 - τ) * target
+    """
+    for target_param, param in zip(target_critic1.parameters(), critic1.parameters()):
+        target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+
+    for target_param, param in zip(target_critic2.parameters(), critic2.parameters()):
+        target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+
+# =============================================================================
+# STEP 7: THE MAIN TRAINING LOOP
+# =============================================================================
+
+def train_sac(env, total_timesteps=30000, batch_size=256, learning_starts=500):
+    """
+    Complete SAC training loop.
+
+    For our ball shooter:
+    - Each timestep = one shot
+    - ~20,000 steps to reach 97% accuracy
+    """
+    state, info = env.reset()
+    episode_reward = 0
+    episode_num = 0
+
+    for step in range(total_timesteps):
+
+        # --- Collect Experience ---
+        # Early on: random actions (fill replay buffer)
+        # Later: use learned policy
+        if step < learning_starts:
+            action = env.action_space.sample()  # Random
+        else:
+            with torch.no_grad():
+                state_t = torch.FloatTensor(state).unsqueeze(0)
+                mean, log_std = actor(state_t)
+                std = log_std.exp()
+                action = torch.tanh(mean + std * torch.randn_like(mean))
+                action = action.squeeze().numpy()
+
+        # Take action (shoot!)
+        next_state, reward, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
+
+        # Store experience
+        replay_buffer.push(state, action, reward, next_state, done)
+        episode_reward += reward
+
+        # --- Learn from Experience ---
+        if step >= learning_starts:
+            # Update critics (learn to evaluate)
+            critic_loss1, critic_loss2 = update_critics(batch_size)
+
+            # Update actor (learn to act)
+            actor_loss, log_prob = update_actor(batch_size)
+
+            # Update entropy coefficient (auto-tune exploration)
+            alpha = update_alpha(log_prob)
+
+            # Update target networks (slow tracking)
+            update_targets(tau=0.005)
+
+        # --- Episode Management ---
+        if done:
+            episode_num += 1
+            print(f"Episode {episode_num}: reward={episode_reward:.1f}")
+            episode_reward = 0
+            state, info = env.reset()
+        else:
+            state = next_state
+
+    return actor  # Return trained policy
+
+# =============================================================================
+# PUTTING IT ALL TOGETHER
+# =============================================================================
+
+# In practice, you just do this:
+from stable_baselines3 import SAC
+from src.env.shooter_env_continuous import ShooterEnvContinuous
+
+env = ShooterEnvContinuous()
+model = SAC("MlpPolicy", env, verbose=1)
+model.learn(total_timesteps=30000)  # All the above happens inside here!
+
+# The trained actor can now hit 97% of shots
+obs, info = env.reset()
+action, _ = model.predict(obs, deterministic=True)  # No exploration noise
+```
+
+### Key Insights from the Code
+
+1. **Two Critics**: SAC uses two Q-networks and takes the minimum. This prevents overestimation - if one critic is too optimistic, the other keeps it in check.
+
+2. **Target Networks**: Instead of using critics directly for computing targets, SAC uses slowly-updated copies. This prevents the "moving target" problem where the network chases itself.
+
+3. **Entropy Bonus**: The `α * log_prob` term rewards uncertainty. Early in training, the policy stays exploratory. As it learns, entropy naturally decreases.
+
+4. **Replay Buffer**: By learning from random past experiences, SAC breaks correlations between consecutive samples. This is crucial for stable learning.
+
+5. **Tanh Squashing**: Actions are squashed to [-1, 1] using tanh. This keeps outputs bounded and differentiable.
+
+### What Happens During Our Training
+
+```
+Step 0-500:     Random actions, filling replay buffer
+                Policy: completely random
+                Reward: ~-10 (all misses)
+
+Step 500-5000:  Critics learning to predict rewards
+                Actor starting to learn patterns
+                Reward: -10 to -5 (still mostly missing)
+
+Step 5000-15000: Actor finding good strategies
+                 Entropy decreasing (more confident)
+                 Reward: -5 to +50 (starting to hit!)
+
+Step 15000-20000: Fine-tuning
+                  High Q-values for good actions
+                  Reward: +80 to +95 (90%+ hits)
+```
+
 ## Algorithm Comparison
 
 | Aspect | PPO | DQN | SAC |
