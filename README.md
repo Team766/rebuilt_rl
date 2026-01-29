@@ -13,6 +13,7 @@ The agent learns to shoot balls into the HUB target from any position in the all
 
 - HUB opening: 1.06m diameter hexagonal
 - HUB height: 1.83m
+- Ball (FUEL): 15.0cm diameter, 0.215kg (AndyMark am-5801)
 - Ball launch height: 0.5m
 - Field: 16.5m x 8.2m
 - Alliance zone depth: 5m
@@ -25,16 +26,41 @@ The agent learns to shoot balls into the HUB target from any position in the all
 
 ## Installation
 
+### Standard Install (most systems, CUDA 12.6)
+
+```bash
+poetry install
+
+# With dev dependencies (pytest, black, ruff)
+poetry install --with dev
+```
+
+### DGX Spark / Blackwell GPUs (CUDA 13.0)
+
+```bash
+# Install base dependencies
+poetry install
+
+# Override PyTorch with cu130 version
+poetry run pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cu130 --force-reinstall
+```
+
+### Using pip
+
 ```bash
 # Requires Python 3.10+ with CUDA support
-pip install gymnasium stable-baselines3 numpy torch
+pip install torch  # Install PyTorch for your CUDA version first
+pip install -e .
 ```
 
 ## Training
 
 ```bash
 # Train SAC with continuous actions (recommended)
-python scripts/train.py --algorithm SAC --env-type continuous --timesteps 30000
+python scripts/train.py --algorithm SAC --env-type continuous --timesteps 50000
+
+# With air resistance for realistic physics
+python scripts/train.py --algorithm SAC --env-type continuous --timesteps 50000 --air-resistance
 
 # Options:
 #   --algorithm: PPO, DQN, or SAC (SAC recommended for continuous)
@@ -42,6 +68,8 @@ python scripts/train.py --algorithm SAC --env-type continuous --timesteps 30000
 #   --timesteps: Total training steps (default: 30000)
 #   --eval-freq: Evaluation frequency (default: 1000)
 #   --n-envs: Parallel environments (default: 4)
+#   --air-resistance: Enable air resistance in physics simulation
+#   --learning-rate: Learning rate (default: 3e-4, try 1e-4 for stability)
 ```
 
 ## Evaluation
@@ -54,16 +82,18 @@ python scripts/evaluate.py models/SAC_CONT_*/best/best_model.zip --env-type cont
 
 ```
 frc_rl/
+├── pyproject.toml             # Package configuration (Poetry)
 ├── src/
 │   ├── config.py              # Game constants and action encoding
 │   ├── env/
 │   │   ├── shooter_env.py     # Discrete action environments (2D, 3D)
 │   │   └── shooter_env_continuous.py  # Continuous action environment
 │   └── physics/
-│       └── projectile.py      # 2D/3D trajectory simulation
+│       └── projectile.py      # 2D/3D trajectory simulation with air resistance
 ├── scripts/
 │   ├── train.py               # Training script
 │   └── evaluate.py            # Evaluation script
+├── docs/                      # Documentation
 └── tests/                     # Unit tests
 ```
 
@@ -89,10 +119,17 @@ frc_rl/
 
 ## Results
 
-SAC with continuous actions achieves ~97% hit rate after 20k training steps:
-- Close range (0-2m): 87%
-- Medium range (2-4m): 100%
-- Long range (4-6m): 100%
+SAC with continuous actions achieves **98.4% hit rate** with air resistance enabled:
+
+| Configuration | Hit Rate |
+|---------------|----------|
+| Without air resistance | 99.7% |
+| With air resistance (realistic) | 98.4% |
+
+Best results achieved with:
+- Learning rate: 1e-4
+- Batch size: 4096
+- ~32k training steps (best checkpoint)
 
 ## Team
 
