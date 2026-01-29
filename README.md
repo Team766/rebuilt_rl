@@ -1,5 +1,7 @@
 # FRC 2026 REBUILT Ball Shooter RL
 
+[![Tests](https://github.com/Team766/rebuilt_rl/actions/workflows/tests.yml/badge.svg)](https://github.com/Team766/rebuilt_rl/actions/workflows/tests.yml)
+
 Reinforcement learning model for FRC 2026 REBUILT game ball shooting. Trains an agent to output optimal launch velocity, elevation angle, and azimuth (turret) angle given the robot's position relative to the target HUB.
 
 ## Overview
