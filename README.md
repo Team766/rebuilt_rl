@@ -26,14 +26,23 @@ The agent learns to shoot balls into the HUB target from any position in the all
 
 ## Installation
 
-### Using Poetry (recommended)
+### Standard Install (most systems, CUDA 12.6)
 
 ```bash
-# Install with Poetry (includes PyTorch with CUDA 13.0 for Blackwell/GB10)
 poetry install
 
 # With dev dependencies (pytest, black, ruff)
 poetry install --with dev
+```
+
+### DGX Spark / Blackwell GPUs (CUDA 13.0)
+
+```bash
+# Install base dependencies
+poetry install
+
+# Override PyTorch with cu130 version
+poetry run pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cu130 --force-reinstall
 ```
 
 ### Using pip

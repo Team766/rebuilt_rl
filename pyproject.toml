@@ -21,26 +21,28 @@ classifiers = [
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
+# PyTorch wheel source - cu126 for broad compatibility
+# For DGX Spark (cu130), see README for override instructions
 [[tool.poetry.source]]
-name = "pytorch-cu130"
-url = "https://download.pytorch.org/whl/cu130"
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
 priority = "explicit"
 
 [tool.poetry.dependencies]
 python = "^3.10,<3.13"
 
-# Base dependencies - always installed
+# Base dependencies
 numpy = "<2.0.0"
 tqdm = "^4.66.0"
+rich = "^13.0.0"
 
-# ML - PyTorch with CUDA 13.0 support (Blackwell/GB10)
-torch = {version = "2.10.0", source = "pytorch-cu130"}
-tensorboard = "^2.14.0"
+# PyTorch with CUDA 12.6 (default for most systems)
+torch = {version = "^2.9.0", source = "pytorch-cu126"}
 
-# RL-specific
+# RL dependencies
 gymnasium = "^0.29.0"
 stable-baselines3 = "^2.2.0"
-rich = "^13.0.0"
+tensorboard = "^2.14.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
