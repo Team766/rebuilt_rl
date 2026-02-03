@@ -3,17 +3,16 @@
 import numpy as np
 import pytest
 
+from src.config import (
+    HUB_ENTRY_MAX,
+    HUB_ENTRY_MIN,
+    HUB_OPENING_HEIGHT,
+    LAUNCH_HEIGHT,
+)
 from src.physics.projectile import (
-    compute_trajectory,
     check_hub_entry,
     compute_optimal_angle,
-)
-from src.config import (
-    LAUNCH_HEIGHT,
-    HUB_OPENING_HEIGHT,
-    HUB_ENTRY_MIN,
-    HUB_ENTRY_MAX,
-    GRAVITY,
+    compute_trajectory,
 )
 
 

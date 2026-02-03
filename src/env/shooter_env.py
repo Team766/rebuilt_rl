@@ -1,29 +1,21 @@
 """Gymnasium environment for FRC ball shooter training."""
 
 import gymnasium as gym
-from gymnasium import spaces
 import numpy as np
+from gymnasium import spaces
 
 from ..config import (
-    VELOCITY_BINS,
-    ANGLE_BINS,
-    AZIMUTH_BINS,
-    VELOCITY_MIN,
-    VELOCITY_MAX,
-    ANGLE_MIN_DEG,
-    ANGLE_MAX_DEG,
-    AZIMUTH_MIN_DEG,
-    AZIMUTH_MAX_DEG,
-    HUB_DISTANCE_FROM_WALL,
     ALLIANCE_ZONE_DEPTH,
     ALLIANCE_ZONE_WIDTH,
-    MIN_DISTANCE_FROM_HUB,
-    HUB_OPENING_HEIGHT,
+    ANGLE_BINS,
+    HUB_DISTANCE_FROM_WALL,
     HUB_OPENING_HALF_WIDTH,
+    MIN_DISTANCE_FROM_HUB,
     REWARD_HIT_BASE,
     REWARD_HIT_CENTER,
     REWARD_MISS_SCALE,
     TOTAL_ACTIONS_3D,
+    VELOCITY_BINS,
     action_to_velocity_angle,
     action_to_velocity_elevation_azimuth,
 )

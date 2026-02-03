@@ -2,17 +2,15 @@
 
 import numpy as np
 import pytest
-import gymnasium as gym
 
-from src.env.shooter_env import ShooterEnv
 from src.config import (
-    VELOCITY_BINS,
-    ANGLE_BINS,
-    MIN_DISTANCE_FROM_HUB,
     ALLIANCE_ZONE_DEPTH,
     ALLIANCE_ZONE_WIDTH,
-    HUB_DISTANCE_FROM_WALL,
+    ANGLE_BINS,
+    MIN_DISTANCE_FROM_HUB,
+    VELOCITY_BINS,
 )
+from src.env.shooter_env import ShooterEnv
 
 
 class TestShooterEnvBasics:

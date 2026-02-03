@@ -1,27 +1,28 @@
 """Gymnasium environment for FRC ball shooter with continuous action space."""
 
 import gymnasium as gym
-from gymnasium import spaces
 import numpy as np
+from gymnasium import spaces
 
 from ..config import (
-    VELOCITY_MIN,
-    VELOCITY_MAX,
-    ANGLE_MIN_DEG,
-    ANGLE_MAX_DEG,
-    AZIMUTH_MIN_DEG,
-    AZIMUTH_MAX_DEG,
-    HUB_DISTANCE_FROM_WALL,
     ALLIANCE_ZONE_DEPTH,
     ALLIANCE_ZONE_WIDTH,
-    MIN_DISTANCE_FROM_HUB,
-    HUB_OPENING_HEIGHT,
+    ANGLE_MAX_DEG,
+    ANGLE_MIN_DEG,
+    AZIMUTH_MAX_DEG,
+    AZIMUTH_MIN_DEG,
+    DEFAULT_SHOT_INTERVAL,
+    HUB_DISTANCE_FROM_WALL,
     HUB_OPENING_HALF_WIDTH,
+    MIN_DISTANCE_FROM_HUB,
     REWARD_HIT_BASE,
     REWARD_HIT_CENTER,
     REWARD_MISS_SCALE,
+    ROBOT_MAX_SPEED,
+    VELOCITY_MAX,
+    VELOCITY_MIN,
 )
-from ..physics.projectile import compute_trajectory_3d
+from ..physics.projectile import compute_trajectory_3d, compute_trajectory_3d_moving
 
 
 class ShooterEnvContinuous(gym.Env):
@@ -31,19 +32,35 @@ class ShooterEnvContinuous(gym.Env):
     This is more natural for the problem and allows finer control.
 
     State: (range, bearing) - distance and angle to target
+           (range, bearing, vx, vy) - when move_and_shoot is enabled
     Action: Continuous (velocity, elevation, azimuth) normalized to [-1, 1]
     Reward: Shaped based on hit/miss and distance from center
 
     Each episode simulates a full match with multiple shots from different positions.
+    When move_and_shoot is enabled, the robot follows a path during the episode
+    and the ball inherits the robot's velocity at launch.
     """
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
-    def __init__(self, render_mode=None, shots_per_episode: int = 50, air_resistance: bool = False):
+    def __init__(
+        self,
+        render_mode=None,
+        shots_per_episode: int = 50,
+        air_resistance: bool = False,
+        move_and_shoot: bool = False,
+        shot_interval: float = DEFAULT_SHOT_INTERVAL,
+        speed_min: float = 0.0,
+        speed_max: float = 0.0,
+    ):
         super().__init__()
 
         self.shots_per_episode = shots_per_episode
         self.air_resistance = air_resistance
+        self.move_and_shoot = move_and_shoot
+        self.shot_interval = shot_interval
+        self.speed_min = speed_min
+        self.speed_max = speed_max
 
         self.render_mode = render_mode
 
@@ -56,16 +73,32 @@ class ShooterEnvContinuous(gym.Env):
             dtype=np.float32,
         )
 
-        # Observation space: (range, bearing)
+        # Observation space depends on mode
         max_dist = np.sqrt(
             (ALLIANCE_ZONE_DEPTH + HUB_DISTANCE_FROM_WALL) ** 2
             + (ALLIANCE_ZONE_WIDTH / 2) ** 2
         )
-        self.observation_space = spaces.Box(
-            low=np.array([MIN_DISTANCE_FROM_HUB, -np.pi], dtype=np.float32),
-            high=np.array([max_dist, np.pi], dtype=np.float32),
-            dtype=np.float32,
-        )
+
+        if self.move_and_shoot:
+            # [distance, bearing, robot_vx, robot_vy]
+            self.observation_space = spaces.Box(
+                low=np.array(
+                    [MIN_DISTANCE_FROM_HUB, -np.pi, -ROBOT_MAX_SPEED, -ROBOT_MAX_SPEED],
+                    dtype=np.float32,
+                ),
+                high=np.array(
+                    [max_dist, np.pi, ROBOT_MAX_SPEED, ROBOT_MAX_SPEED],
+                    dtype=np.float32,
+                ),
+                dtype=np.float32,
+            )
+        else:
+            # [distance, bearing]
+            self.observation_space = spaces.Box(
+                low=np.array([MIN_DISTANCE_FROM_HUB, -np.pi], dtype=np.float32),
+                high=np.array([max_dist, np.pi], dtype=np.float32),
+                dtype=np.float32,
+            )
 
         # Action scaling parameters
         self.velocity_range = (VELOCITY_MIN, VELOCITY_MAX)
@@ -76,15 +109,21 @@ class ShooterEnvContinuous(gym.Env):
         self.hub_x = HUB_DISTANCE_FROM_WALL
         self.hub_y = ALLIANCE_ZONE_WIDTH / 2
 
-        # Robot position (set in reset)
+        # Robot state (set in reset)
         self.robot_x = 0.0
         self.robot_y = 0.0
+        self.robot_vx = 0.0
+        self.robot_vy = 0.0
         self.distance_to_hub = 0.0
         self.bearing_to_hub = 0.0
 
         # Episode tracking
         self.current_shot = 0
         self.episode_hits = 0
+
+        # Path state (for move_and_shoot mode)
+        self.current_path = None
+        self.path_time = 0.0
 
         self.last_trajectory = None
 
@@ -93,9 +132,12 @@ class ShooterEnvContinuous(gym.Env):
         # action[0] -> velocity
         # action[1] -> elevation
         # action[2] -> azimuth
-        velocity = (action[0] + 1) / 2 * (self.velocity_range[1] - self.velocity_range[0]) + self.velocity_range[0]
-        elevation = (action[1] + 1) / 2 * (self.elevation_range[1] - self.elevation_range[0]) + self.elevation_range[0]
-        azimuth = (action[2] + 1) / 2 * (self.azimuth_range[1] - self.azimuth_range[0]) + self.azimuth_range[0]
+        v_lo, v_hi = self.velocity_range
+        e_lo, e_hi = self.elevation_range
+        a_lo, a_hi = self.azimuth_range
+        velocity = (action[0] + 1) / 2 * (v_hi - v_lo) + v_lo
+        elevation = (action[1] + 1) / 2 * (e_hi - e_lo) + e_lo
+        azimuth = (action[2] + 1) / 2 * (a_hi - a_lo) + a_lo
         return velocity, elevation, azimuth
 
     def _generate_new_position(self):
@@ -112,6 +154,44 @@ class ShooterEnvContinuous(gym.Env):
 
             valid_position = self.distance_to_hub >= MIN_DISTANCE_FROM_HUB
 
+        self.robot_vx = 0.0
+        self.robot_vy = 0.0
+
+    def _update_position_from_path(self):
+        """Update robot position, bearing, and velocity from current path state."""
+        state = self.current_path.state_at(self.path_time)
+        self.robot_x = state.x
+        self.robot_y = state.y
+        self.robot_vx = state.vx
+        self.robot_vy = state.vy
+
+        dx = self.hub_x - self.robot_x
+        dy = self.hub_y - self.robot_y
+        self.distance_to_hub = np.sqrt(dx * dx + dy * dy)
+        self.bearing_to_hub = np.arctan2(dy, dx)
+
+    def _make_observation(self) -> np.ndarray:
+        """Build observation array based on mode."""
+        if self.move_and_shoot:
+            return np.array(
+                [self.distance_to_hub, self.bearing_to_hub, self.robot_vx, self.robot_vy],
+                dtype=np.float32,
+            )
+        else:
+            return np.array(
+                [self.distance_to_hub, self.bearing_to_hub],
+                dtype=np.float32,
+            )
+
+    def set_curriculum_level(self, speed_min: float, speed_max: float):
+        """Update speed range for curriculum learning.
+
+        Called by CurriculumCallback via env_method(). Changes take effect
+        on the next reset().
+        """
+        self.speed_min = speed_min
+        self.speed_max = speed_max
+
     def reset(self, seed=None, options=None):
         """Reset environment for new episode."""
         super().reset(seed=seed)
@@ -120,12 +200,22 @@ class ShooterEnvContinuous(gym.Env):
         self.current_shot = 0
         self.episode_hits = 0
 
-        # Generate first position
-        self._generate_new_position()
+        # Generate initial position
+        if self.move_and_shoot and self.speed_max > 0:
+            from ..paths.path_generator import generate_straight_line_path
 
-        observation = np.array(
-            [self.distance_to_hub, self.bearing_to_hub], dtype=np.float32
-        )
+            self.current_path = generate_straight_line_path(
+                self.np_random,
+                speed_min=self.speed_min,
+                speed_max=self.speed_max,
+            )
+            self.path_time = 0.0
+            self._update_position_from_path()
+        else:
+            self.current_path = None
+            self._generate_new_position()
+
+        observation = self._make_observation()
         info = {
             "robot_x": self.robot_x,
             "robot_y": self.robot_y,
@@ -134,6 +224,9 @@ class ShooterEnvContinuous(gym.Env):
             "bearing_deg": np.rad2deg(self.bearing_to_hub),
             "shot": self.current_shot,
         }
+        if self.move_and_shoot:
+            info["robot_vx"] = self.robot_vx
+            info["robot_vy"] = self.robot_vy
 
         return observation, info
 
@@ -142,15 +235,27 @@ class ShooterEnvContinuous(gym.Env):
         # Scale action to actual values
         velocity, elevation, azimuth = self._scale_action(action)
 
-        # Compute 3D trajectory
-        result = compute_trajectory_3d(
-            velocity=velocity,
-            elevation=elevation,
-            azimuth=azimuth,
-            target_distance=self.distance_to_hub,
-            target_bearing=self.bearing_to_hub,
-            air_resistance=self.air_resistance,
-        )
+        # Compute trajectory — use moving physics when robot has velocity
+        if self.move_and_shoot and self.current_path is not None:
+            result = compute_trajectory_3d_moving(
+                launch_velocity=velocity,
+                elevation=elevation,
+                azimuth=azimuth,
+                target_distance=self.distance_to_hub,
+                target_bearing=self.bearing_to_hub,
+                robot_vx=self.robot_vx,
+                robot_vy=self.robot_vy,
+                air_resistance=self.air_resistance,
+            )
+        else:
+            result = compute_trajectory_3d(
+                velocity=velocity,
+                elevation=elevation,
+                azimuth=azimuth,
+                target_distance=self.distance_to_hub,
+                target_bearing=self.bearing_to_hub,
+                air_resistance=self.air_resistance,
+            )
 
         self.last_trajectory = result
 
@@ -168,18 +273,25 @@ class ShooterEnvContinuous(gym.Env):
         terminated = self.current_shot >= self.shots_per_episode
         truncated = False
 
-        # Move to new position for next shot (if not terminated)
+        # Move to next position for next shot (if not terminated)
         if not terminated:
-            self._generate_new_position()
+            if self.move_and_shoot and self.current_path is not None:
+                self.path_time += self.shot_interval
+                self._update_position_from_path()
+            else:
+                self._generate_new_position()
 
-        observation = np.array(
-            [self.distance_to_hub, self.bearing_to_hub], dtype=np.float32
+        observation = self._make_observation()
+
+        # velocity_y_at_target field name differs between result types
+        vy_at_target = getattr(
+            result, "velocity_z_at_target", getattr(result, "velocity_y_at_target", 0.0)
         )
 
         info = {
             "hit": result.hit,
             "height_at_target": result.height_at_target,
-            "velocity_y_at_target": result.velocity_y_at_target,
+            "velocity_y_at_target": vy_at_target,
             "lateral_offset": result.lateral_offset,
             "vertical_miss": result.vertical_miss,
             "lateral_miss": result.lateral_miss,
@@ -195,6 +307,9 @@ class ShooterEnvContinuous(gym.Env):
             "episode_hits": self.episode_hits,
             "episode_hit_rate": self.episode_hits / self.current_shot,
         }
+        if self.move_and_shoot:
+            info["robot_vx"] = self.robot_vx
+            info["robot_vy"] = self.robot_vy
 
         return observation, reward, terminated, truncated, info
 
