@@ -1,19 +1,20 @@
-"""2D projectile motion physics for ball shooter simulation."""
+"""Projectile motion physics for ball shooter simulation (2D and 3D)."""
 
-import numpy as np
 from dataclasses import dataclass
 
+import numpy as np
+
 from ..config import (
-    GRAVITY,
-    LAUNCH_HEIGHT,
-    HUB_OPENING_HEIGHT,
-    HUB_OPENING_HALF_WIDTH,
-    HUB_ENTRY_MIN,
-    HUB_ENTRY_MAX,
-    BALL_RADIUS,
     AIR_DENSITY,
-    DRAG_COEFFICIENT,
     BALL_MASS,
+    BALL_RADIUS,
+    DRAG_COEFFICIENT,
+    GRAVITY,
+    HUB_ENTRY_MAX,
+    HUB_ENTRY_MIN,
+    HUB_OPENING_HALF_WIDTH,
+    HUB_OPENING_HEIGHT,
+    LAUNCH_HEIGHT,
 )
 
 
@@ -290,6 +291,175 @@ def compute_trajectory_3d(
         center_distance=center_distance,
         trajectory_x=result_2d.trajectory_x,
         trajectory_y=result_2d.trajectory_y,
+    )
+
+
+@dataclass
+class TrajectoryResult3DMoving:
+    """Result of 3D trajectory computation with robot velocity."""
+
+    hit: bool
+    height_at_target: float
+    velocity_z_at_target: float
+    lateral_offset: float
+    vertical_miss: float
+    lateral_miss: float
+    total_miss_distance: float
+    center_distance: float
+    trajectory_x: np.ndarray  # field X coordinates
+    trajectory_y: np.ndarray  # field Y coordinates (lateral)
+    trajectory_z: np.ndarray  # height
+
+
+def compute_trajectory_3d_moving(
+    launch_velocity: float,
+    elevation: float,
+    azimuth: float,
+    target_distance: float,
+    target_bearing: float,
+    robot_vx: float = 0.0,
+    robot_vy: float = 0.0,
+    dt: float = 0.001,
+    air_resistance: bool = False,
+) -> TrajectoryResult3DMoving:
+    """Compute 3D trajectory where the ball inherits robot horizontal velocity.
+
+    The ball's initial velocity is the vector sum of the launch velocity
+    (decomposed by elevation and azimuth) and the robot's ground-plane velocity.
+
+    Coordinate frame (robot at origin):
+      - Bearing axis points from robot toward HUB
+      - Cross-bearing axis is perpendicular (right-hand rule)
+      - Z is height (vertical, up positive)
+
+    Args:
+        launch_velocity: Muzzle velocity in m/s (relative to robot)
+        elevation: Launch elevation angle in radians (from horizontal)
+        azimuth: Turret azimuth angle in radians (absolute field frame)
+        target_distance: Distance from robot to hub center in meters
+        target_bearing: Bearing from robot to hub in radians
+        robot_vx: Robot velocity in field X direction (m/s)
+        robot_vy: Robot velocity in field Y direction (m/s)
+        dt: Time step for Euler integration
+        air_resistance: Whether to include quadratic drag
+
+    Returns:
+        TrajectoryResult3DMoving with full 3D trajectory data
+    """
+    # Decompose launch velocity into field-frame 3D components
+    v_horiz = launch_velocity * np.cos(elevation)
+    vz = launch_velocity * np.sin(elevation)
+
+    # Horizontal launch direction determined by azimuth (field frame)
+    vx = v_horiz * np.cos(azimuth) + robot_vx
+    vy = v_horiz * np.sin(azimuth) + robot_vy
+
+    # Ball starts at robot position (origin), height = LAUNCH_HEIGHT
+    x = 0.0
+    y = 0.0
+    z = LAUNCH_HEIGHT
+
+    # Air resistance coefficient
+    if air_resistance:
+        cross_section = np.pi * BALL_RADIUS**2
+        drag_k = 0.5 * AIR_DENSITY * DRAG_COEFFICIENT * cross_section / BALL_MASS
+
+    xs, ys, zs = [x], [y], [z]
+
+    # Bearing unit vectors for projection onto target plane
+    cos_b = np.cos(target_bearing)
+    sin_b = np.sin(target_bearing)
+
+    # Track when ball crosses the target plane (perpendicular to bearing at target_distance)
+    height_at_target = None
+    vz_at_target = None
+    lateral_at_target = None
+
+    prev_d_along = 0.0
+    prev_x, prev_y, prev_z, prev_vz = x, y, z, vz
+
+    max_time = 5.0  # seconds upper bound
+    t = 0.0
+
+    while t < max_time and z >= 0:
+        if air_resistance:
+            v_mag = np.sqrt(vx**2 + vy**2 + vz**2)
+            if v_mag > 0:
+                ax = -drag_k * v_mag * vx
+                ay = -drag_k * v_mag * vy
+                az = -drag_k * v_mag * vz - GRAVITY
+            else:
+                ax, ay, az = 0.0, 0.0, -GRAVITY
+            vx += ax * dt
+            vy += ay * dt
+            vz += az * dt
+        else:
+            vz -= GRAVITY * dt
+
+        x += vx * dt
+        y += vy * dt
+        z += vz * dt
+        t += dt
+
+        # Project position onto bearing axis
+        d_along = x * cos_b + y * sin_b
+
+        # Detect crossing of target plane
+        if prev_d_along < target_distance <= d_along and height_at_target is None:
+            # Linear interpolation to find exact crossing point
+            if d_along > prev_d_along:
+                frac = (target_distance - prev_d_along) / (d_along - prev_d_along)
+            else:
+                frac = 0.0
+            height_at_target = prev_z + frac * (z - prev_z)
+            vz_at_target = prev_vz + frac * (vz - prev_vz)
+            # Lateral offset: perpendicular component to bearing
+            cross_x = prev_x + frac * (x - prev_x)
+            cross_y = prev_y + frac * (y - prev_y)
+            lateral_at_target = -cross_x * sin_b + cross_y * cos_b
+
+        prev_d_along = d_along
+        prev_x, prev_y, prev_z, prev_vz = x, y, z, vz
+
+        xs.append(x)
+        ys.append(y)
+        zs.append(z)
+
+    # Ball never reached target plane
+    if height_at_target is None:
+        height_at_target = 0.0
+        vz_at_target = -abs(vz) if vz != 0 else -1.0
+        lateral_at_target = 0.0
+
+    # Evaluate hit/miss using same criteria as existing code
+    vertical_hit, vertical_miss = check_hub_entry(height_at_target, vz_at_target)
+
+    effective_radius = HUB_OPENING_HALF_WIDTH - BALL_RADIUS
+    lateral_miss_dist = max(0.0, abs(lateral_at_target) - effective_radius)
+    lateral_hit = lateral_miss_dist == 0.0
+
+    hit = vertical_hit and lateral_hit
+
+    if hit:
+        total_miss_distance = 0.0
+    else:
+        total_miss_distance = np.sqrt(vertical_miss**2 + lateral_miss_dist**2)
+
+    vertical_center_dist = abs(height_at_target - HUB_OPENING_HEIGHT)
+    center_distance = np.sqrt(vertical_center_dist**2 + lateral_at_target**2)
+
+    return TrajectoryResult3DMoving(
+        hit=hit,
+        height_at_target=height_at_target,
+        velocity_z_at_target=vz_at_target,
+        lateral_offset=lateral_at_target,
+        vertical_miss=vertical_miss if not vertical_hit else 0.0,
+        lateral_miss=lateral_miss_dist,
+        total_miss_distance=total_miss_distance,
+        center_distance=center_distance,
+        trajectory_x=np.array(xs),
+        trajectory_y=np.array(ys),
+        trajectory_z=np.array(zs),
     )
 
 

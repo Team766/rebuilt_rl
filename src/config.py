@@ -149,3 +149,8 @@ def velocity_angle_to_action(velocity: float, angle_rad: float) -> int:
 # Total action space sizes
 TOTAL_ACTIONS_2D = VELOCITY_BINS * ANGLE_BINS  # 150
 TOTAL_ACTIONS_3D = VELOCITY_BINS * ANGLE_BINS * AZIMUTH_BINS  # 27,000
+
+# Move-and-shoot defaults
+ROBOT_MAX_SPEED = 5.0           # m/s (FRC typical max drivetrain speed)
+DEFAULT_SHOT_INTERVAL = 0.5     # seconds between shots
+DEFAULT_PATH_MIN_DURATION = 3.0  # seconds minimum path length

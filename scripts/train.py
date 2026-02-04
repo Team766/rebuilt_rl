@@ -2,21 +2,22 @@
 """Training script for FRC ball shooter RL agent."""
 
 import argparse
-import os
 import sys
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 import torch
-from stable_baselines3 import PPO, DQN, SAC
+from stable_baselines3 import DQN, PPO, SAC
+
+from src.sac_logging import LoggingSAC
 from stable_baselines3.common.callbacks import (
-    EvalCallback,
-    CheckpointCallback,
     CallbackList,
+    CheckpointCallback,
+    EvalCallback,
 )
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
@@ -25,13 +26,23 @@ from src.env.shooter_env import ShooterEnv, ShooterEnv3D
 from src.env.shooter_env_continuous import ShooterEnvContinuous
 
 
-def make_env(seed: int = 0, env_type: str = "2d", air_resistance: bool = False):
+def make_env(
+    seed: int = 0,
+    env_type: str = "2d",
+    air_resistance: bool = False,
+    move_and_shoot: bool = False,
+    shot_interval: float = 0.5,
+):
     """Create a single environment instance."""
     def _init():
         if env_type == "3d":
             env = ShooterEnv3D(air_resistance=air_resistance)
         elif env_type == "continuous":
-            env = ShooterEnvContinuous(air_resistance=air_resistance)
+            env = ShooterEnvContinuous(
+                air_resistance=air_resistance,
+                move_and_shoot=move_and_shoot,
+                shot_interval=shot_interval,
+            )
         else:
             env = ShooterEnv(air_resistance=air_resistance)
         env = Monitor(env)
@@ -54,11 +65,14 @@ def train(
     verbose: int = 1,
     env_type: str = "2d",
     air_resistance: bool = False,
+    move_and_shoot: bool = False,
+    shot_interval: float = 0.5,
+    resume: str | None = None,
 ):
     """Train the RL agent.
 
     Args:
-        algorithm: RL algorithm ("PPO" or "DQN")
+        algorithm: RL algorithm ("PPO", "DQN", or "SAC")
         total_timesteps: Total training timesteps
         n_envs: Number of parallel environments
         seed: Random seed
@@ -69,8 +83,11 @@ def train(
         checkpoint_freq: Checkpoint save frequency
         learning_rate: Learning rate
         verbose: Verbosity level
-        env_type: "2d" for original env, "3d" for turret aiming
+        env_type: "2d" for original env, "3d" for turret aiming, "continuous" for SAC
         air_resistance: Whether to enable air resistance in physics
+        move_and_shoot: Whether to enable move-and-shoot training with curriculum
+        shot_interval: Seconds between shots in move-and-shoot mode
+        resume: Path to a saved model zip to resume training from
     """
     # Set seeds
     torch.manual_seed(seed)
@@ -79,6 +96,8 @@ def train(
     # Create directories
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     env_suffix = {"2d": "", "3d": "_3D", "continuous": "_CONT"}[env_type]
+    if move_and_shoot:
+        env_suffix += "_MAS"
     run_name = f"{algorithm}{env_suffix}_{timestamp}"
     save_path = Path(save_dir) / run_name
     log_path = Path(log_dir) / run_name
@@ -88,17 +107,26 @@ def train(
     print(f"Training {algorithm} for {total_timesteps:,} timesteps")
     print(f"Environment: {env_type.upper()}")
     print(f"Air resistance: {'ON' if air_resistance else 'OFF'}")
+    print(f"Move and shoot: {'ON' if move_and_shoot else 'OFF'}")
+    if move_and_shoot:
+        print(f"Shot interval: {shot_interval}s")
     print(f"Save path: {save_path}")
     print(f"Log path: {log_path}")
 
     # Create vectorized training environment
+    env_kwargs = dict(
+        env_type=env_type,
+        air_resistance=air_resistance,
+        move_and_shoot=move_and_shoot,
+        shot_interval=shot_interval,
+    )
     if n_envs > 1:
-        env = SubprocVecEnv([make_env(seed + i, env_type, air_resistance) for i in range(n_envs)])
+        env = SubprocVecEnv([make_env(seed + i, **env_kwargs) for i in range(n_envs)])
     else:
-        env = DummyVecEnv([make_env(seed, env_type, air_resistance)])
+        env = DummyVecEnv([make_env(seed, **env_kwargs)])
 
     # Create evaluation environment
-    eval_env = DummyVecEnv([make_env(seed + 1000, env_type, air_resistance)])
+    eval_env = DummyVecEnv([make_env(seed + 1000, **env_kwargs)])
 
     # Create model - check for available GPU memory
     device = "cpu"
@@ -120,88 +148,130 @@ def train(
 
     print(f"Using device: {device}")
 
-    # Policy network architecture - large networks for GPU utilization
-    policy_kwargs = dict(
-        net_arch=dict(pi=[512, 512, 256], vf=[512, 512, 256])
-    )
-    sac_policy_kwargs = dict(
-        net_arch=[512, 512, 256]
-    )
-
-    if algorithm.upper() == "PPO":
-        model = PPO(
-            "MlpPolicy",
-            env,
-            learning_rate=learning_rate,
-            n_steps=2048,
-            batch_size=64,
-            n_epochs=10,
-            gamma=0.99,
-            gae_lambda=0.95,
-            clip_range=0.2,
-            ent_coef=0.01,
-            vf_coef=0.5,
-            max_grad_norm=0.5,
-            policy_kwargs=policy_kwargs,
-            tensorboard_log=str(log_path),
-            verbose=verbose,
-            seed=seed,
+    # Resume from checkpoint or create new model
+    algo_cls = {"PPO": PPO, "SAC": LoggingSAC, "DQN": DQN}[algorithm.upper()]
+    if resume:
+        print(f"Resuming from: {resume}")
+        model = algo_cls.load(
+            resume,
+            env=env,
             device=device,
-        )
-    elif algorithm.upper() == "SAC":
-        # SAC is better for continuous action spaces
-        # Large batch + multiple gradient steps for GPU utilization
-        model = SAC(
-            "MlpPolicy",
-            env,
-            learning_rate=learning_rate,
-            buffer_size=500_000,
-            learning_starts=500,
-            batch_size=4096,  # Large batch for GPU utilization
-            tau=0.005,
-            gamma=0.99,
-            train_freq=1,
-            gradient_steps=4,  # Multiple updates per step for GPU utilization
-            ent_coef="auto",
-            policy_kwargs=sac_policy_kwargs,
             tensorboard_log=str(log_path),
-            verbose=verbose,
-            seed=seed,
-            device=device,
         )
-    elif algorithm.upper() == "DQN":
-        model = DQN(
-            "MlpPolicy",
-            env,
-            learning_rate=learning_rate,
-            buffer_size=100_000,
-            learning_starts=1000,
-            batch_size=64,
-            tau=0.005,
-            gamma=0.99,
-            train_freq=4,
-            target_update_interval=1000,
-            exploration_fraction=0.1,
-            exploration_final_eps=0.05,
-            tensorboard_log=str(log_path),
-            verbose=verbose,
-            seed=seed,
-            device=device,
-        )
+        # Load replay buffer if it exists (SAC/DQN)
+        replay_path = resume.replace(".zip", "").replace(
+            "shooter_", "shooter_replay_buffer_"
+        ) + ".pkl"
+        if Path(replay_path).exists() and algorithm.upper() in ["SAC", "DQN"]:
+            print(f"Loading replay buffer: {replay_path}")
+            model.load_replay_buffer(replay_path)
     else:
-        raise ValueError(f"Unknown algorithm: {algorithm}")
+        # Policy network architecture - large networks for GPU utilization
+        policy_kwargs = dict(
+            net_arch=dict(pi=[512, 512, 256], vf=[512, 512, 256])
+        )
+        sac_policy_kwargs = dict(
+            net_arch=[512, 512, 256]
+        )
+
+        if algorithm.upper() == "PPO":
+            model = PPO(
+                "MlpPolicy",
+                env,
+                learning_rate=learning_rate,
+                n_steps=2048,
+                batch_size=64,
+                n_epochs=10,
+                gamma=0.99,
+                gae_lambda=0.95,
+                clip_range=0.2,
+                ent_coef=0.01,
+                vf_coef=0.5,
+                max_grad_norm=0.5,
+                policy_kwargs=policy_kwargs,
+                tensorboard_log=str(log_path),
+                verbose=verbose,
+                seed=seed,
+                device=device,
+            )
+        elif algorithm.upper() == "SAC":
+            # target_entropy=-6 (2x default of -dim(A)=-3) because the optimal
+            # policy is nearly deterministic: given distance+bearing there is one
+            # correct launch configuration.  The default target drives entropy
+            # back up after convergence, degrading the learned policy.
+            model = LoggingSAC(
+                "MlpPolicy",
+                env,
+                learning_rate=learning_rate,
+                buffer_size=500_000,
+                learning_starts=1000,
+                batch_size=256,
+                tau=0.005,
+                gamma=0.99,
+                train_freq=1,
+                gradient_steps=1,
+                ent_coef="auto",
+                target_entropy=-6.0,
+                policy_kwargs=sac_policy_kwargs,
+                tensorboard_log=str(log_path),
+                verbose=verbose,
+                seed=seed,
+                device=device,
+            )
+        elif algorithm.upper() == "DQN":
+            model = DQN(
+                "MlpPolicy",
+                env,
+                learning_rate=learning_rate,
+                buffer_size=100_000,
+                learning_starts=1000,
+                batch_size=64,
+                tau=0.005,
+                gamma=0.99,
+                train_freq=4,
+                target_update_interval=1000,
+                exploration_fraction=0.1,
+                exploration_final_eps=0.05,
+                tensorboard_log=str(log_path),
+                verbose=verbose,
+                seed=seed,
+                device=device,
+            )
+        else:
+            raise ValueError(f"Unknown algorithm: {algorithm}")
 
     # Create callbacks
-    eval_callback = EvalCallback(
-        eval_env,
-        best_model_save_path=str(save_path / "best"),
-        log_path=str(log_path),
-        eval_freq=eval_freq // n_envs,  # Adjust for vectorized env
-        n_eval_episodes=n_eval_episodes,
-        deterministic=True,
-        render=False,
-        verbose=verbose,
-    )
+    # Curriculum callback for move-and-shoot
+    if move_and_shoot:
+        from src.callbacks.curriculum import CurriculumCallback
+
+        curriculum_callback = CurriculumCallback(
+            shots_per_episode=50,
+            eval_window=3,
+            verbose=verbose,
+        )
+        eval_callback = EvalCallback(
+            eval_env,
+            callback_after_eval=curriculum_callback,
+            best_model_save_path=str(save_path / "best"),
+            log_path=str(log_path),
+            eval_freq=eval_freq // n_envs,
+            n_eval_episodes=n_eval_episodes,
+            deterministic=True,
+            render=False,
+            verbose=verbose,
+        )
+    else:
+        eval_callback = EvalCallback(
+            eval_env,
+            best_model_save_path=str(save_path / "best"),
+            log_path=str(log_path),
+            eval_freq=eval_freq // n_envs,
+            n_eval_episodes=n_eval_episodes,
+            deterministic=True,
+            render=False,
+            verbose=verbose,
+        )
 
     checkpoint_callback = CheckpointCallback(
         save_freq=checkpoint_freq // n_envs,
@@ -302,8 +372,28 @@ def main():
         action="store_true",
         help="Enable air resistance in physics simulation",
     )
+    parser.add_argument(
+        "--move-and-shoot",
+        action="store_true",
+        help="Enable move-and-shoot training with curriculum learning (continuous env only)",
+    )
+    parser.add_argument(
+        "--shot-interval",
+        type=float,
+        default=0.5,
+        help="Seconds between shots in move-and-shoot mode (default: 0.5)",
+    )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Path to saved model checkpoint to resume training from",
+    )
 
     args = parser.parse_args()
+
+    if args.move_and_shoot and args.env_type != "continuous":
+        parser.error("--move-and-shoot requires --env-type continuous")
 
     train(
         algorithm=args.algorithm,
@@ -317,6 +407,9 @@ def main():
         verbose=args.verbose,
         env_type=args.env_type,
         air_resistance=args.air_resistance,
+        move_and_shoot=args.move_and_shoot,
+        shot_interval=args.shot_interval,
+        resume=args.resume,
     )
 
 

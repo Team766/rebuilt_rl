@@ -64,6 +64,15 @@ python scripts/train.py --algorithm SAC --env-type continuous --timesteps 50000
 # With air resistance for realistic physics
 python scripts/train.py --algorithm SAC --env-type continuous --timesteps 50000 --air-resistance
 
+# Move-and-shoot with curriculum learning (trains robot to shoot while moving)
+python scripts/train.py --algorithm SAC --env-type continuous --move-and-shoot --timesteps 150000
+
+# Move-and-shoot with air resistance
+python scripts/train.py --algorithm SAC --env-type continuous --move-and-shoot --air-resistance --timesteps 150000
+
+# Resume from a checkpoint
+python scripts/train.py --algorithm SAC --env-type continuous --resume models/SAC_CONT_*/checkpoints/shooter_50000_steps.zip
+
 # Options:
 #   --algorithm: PPO, DQN, or SAC (SAC recommended for continuous)
 #   --env-type: 2d, 3d, or continuous
@@ -71,7 +80,10 @@ python scripts/train.py --algorithm SAC --env-type continuous --timesteps 50000 
 #   --eval-freq: Evaluation frequency (default: 1000)
 #   --n-envs: Parallel environments (default: 4)
 #   --air-resistance: Enable air resistance in physics simulation
-#   --learning-rate: Learning rate (default: 3e-4, try 1e-4 for stability)
+#   --move-and-shoot: Enable move-and-shoot with curriculum learning (continuous only)
+#   --shot-interval: Seconds between shots in move-and-shoot mode (default: 0.5)
+#   --learning-rate: Learning rate (default: 3e-4)
+#   --resume: Path to saved model checkpoint to resume training from
 ```
 
 ## Evaluation
@@ -83,13 +95,17 @@ python scripts/evaluate.py models/SAC_CONT_*/best/best_model.zip --env-type cont
 ## Project Structure
 
 ```
-frc_rl/
+rebuilt_rl/
 ├── pyproject.toml             # Package configuration (Poetry)
 ├── src/
 │   ├── config.py              # Game constants and action encoding
+│   ├── sac_logging.py         # LoggingSAC: SAC with gradient norm logging and clipping
 │   ├── env/
 │   │   ├── shooter_env.py     # Discrete action environments (2D, 3D)
-│   │   └── shooter_env_continuous.py  # Continuous action environment
+│   │   └── shooter_env_continuous.py  # Continuous action environment (supports move-and-shoot)
+│   ├── paths/                 # Path generation for move-and-shoot mode
+│   ├── callbacks/
+│   │   └── curriculum.py      # Curriculum learning callback for progressive difficulty
 │   └── physics/
 │       └── projectile.py      # 2D/3D trajectory simulation with air resistance
 ├── scripts/
@@ -102,8 +118,13 @@ frc_rl/
 ## Environment Details
 
 ### Observation Space
-- `range`: Distance to target (0.5m - ~12m)
+
+**Stationary mode**: `[distance, bearing]`
+- `distance`: Range to target (0.5m - ~12m)
 - `bearing`: Angle to target (-π to π radians)
+
+**Move-and-shoot mode**: `[distance, bearing, vx, vy]`
+- Adds robot velocity components so the agent can compensate for movement
 
 ### Action Space (Continuous)
 - 3D Box [-1, 1] scaled to actual ranges
@@ -119,7 +140,22 @@ frc_rl/
 - 50 shots per episode (simulates a match)
 - Robot moves to new random position after each shot
 
+### Curriculum Learning (Move-and-Shoot)
+
+When `--move-and-shoot` is enabled, the agent trains through progressive difficulty levels:
+
+| Level | Name | Speed | Hit Rate to Advance |
+|-------|------|-------|---------------------|
+| 0 | Crawl | 0.1 - 0.5 m/s | 70% |
+| 1 | Slow | 0.5 - 1.5 m/s | 60% |
+| 2 | Medium | 1.5 - 3.0 m/s | 50% |
+| 3 | Fast | 3.0 - 5.0 m/s | Terminal |
+
+The replay buffer is cleared on each level advance to prevent stale transitions from destabilizing the critic.
+
 ## Results
+
+### Stationary Shooting
 
 SAC with continuous actions achieves **98.4% hit rate** with air resistance enabled:
 
@@ -128,10 +164,26 @@ SAC with continuous actions achieves **98.4% hit rate** with air resistance enab
 | Without air resistance | 99.7% |
 | With air resistance (realistic) | 98.4% |
 
-Best results achieved with:
-- Learning rate: 1e-4
-- Batch size: 4096
-- ~32k training steps (best checkpoint)
+### Move-and-Shoot
+
+With curriculum learning, the agent learns to shoot accurately while moving at up to 5 m/s:
+
+| Configuration | Peak Reward | Final Reward |
+|---------------|-------------|--------------|
+| No air resistance (150k steps) | +98.93 | +94.57 |
+| With air resistance (150k steps) | +99.44 | +97.22 |
+
+### SAC Hyperparameters
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Learning rate | 3e-4 | |
+| Batch size | 256 | Larger values cause critic divergence |
+| Gradient steps | 1 | Per environment step |
+| Buffer size | 500,000 | |
+| Target entropy | -6.0 | 2x default; optimal policy is nearly deterministic |
+| Gradient clipping | 1.0 | Max norm on actor and critic |
+| Network | [512, 512, 256] | Shared architecture for actor and critic |
 
 ## Team
 

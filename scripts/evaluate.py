@@ -9,11 +9,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
-from stable_baselines3 import PPO, DQN, SAC
+from stable_baselines3 import DQN, PPO, SAC
 
+from src.config import action_to_velocity_angle, action_to_velocity_elevation_azimuth
 from src.env.shooter_env import ShooterEnv, ShooterEnv3D
 from src.env.shooter_env_continuous import ShooterEnvContinuous
-from src.config import action_to_velocity_angle, action_to_velocity_elevation_azimuth
 
 
 def evaluate(
@@ -23,6 +23,8 @@ def evaluate(
     verbose: bool = True,
     analyze_by_distance: bool = True,
     env_type: str = "2d",
+    air_resistance: bool = False,
+    move_and_shoot: bool = False,
 ):
     """Evaluate a trained model.
 
@@ -65,11 +67,14 @@ def evaluate(
 
     # Create environment based on type
     if env_type == "3d":
-        env = ShooterEnv3D()
+        env = ShooterEnv3D(air_resistance=air_resistance)
     elif env_type == "continuous":
-        env = ShooterEnvContinuous()
+        env = ShooterEnvContinuous(
+            air_resistance=air_resistance,
+            move_and_shoot=move_and_shoot,
+        )
     else:
-        env = ShooterEnv()
+        env = ShooterEnv(air_resistance=air_resistance)
 
     # Track results
     hits = 0
@@ -161,7 +166,7 @@ def evaluate(
                     break
 
         if verbose:
-            print(f"\nHit Rate by Distance:")
+            print("\nHit Rate by Distance:")
             print(f"{'-'*30}")
             for bin_key, data in bin_results.items():
                 if data["total"] > 0:
@@ -170,7 +175,7 @@ def evaluate(
 
     # Sample some specific results
     if verbose and len(results) > 0:
-        print(f"\nSample Shots:")
+        print("\nSample Shots:")
         print(f"{'-'*70}")
         if env_type in ["3d", "continuous"]:
             print(f"{'Dist':>6} {'Vel':>6} {'Elev':>6} {'Azim':>6} {'Height':>7} {'Hit':>5}")
@@ -257,6 +262,16 @@ def main():
         choices=["2d", "3d", "continuous"],
         help="Environment type",
     )
+    parser.add_argument(
+        "--air-resistance",
+        action="store_true",
+        help="Enable air resistance (should match training config)",
+    )
+    parser.add_argument(
+        "--move-and-shoot",
+        action="store_true",
+        help="Enable move-and-shoot mode (should match training config)",
+    )
 
     args = parser.parse_args()
 
@@ -268,6 +283,8 @@ def main():
             n_episodes=args.episodes,
             seed=args.seed,
             env_type=args.env_type,
+            air_resistance=args.air_resistance,
+            move_and_shoot=args.move_and_shoot,
         )
 
         if args.random_baseline:
