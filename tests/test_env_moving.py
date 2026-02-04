@@ -152,28 +152,6 @@ class TestMoveAndShootStep:
         env.close()
 
 
-class TestSetCurriculumLevel:
-    def test_set_curriculum_level(self):
-        env = ShooterEnvContinuous(move_and_shoot=True)
-        env.set_curriculum_level(2.0, 4.0)
-        assert env.speed_min == 2.0
-        assert env.speed_max == 4.0
-        env.close()
-
-    def test_curriculum_level_takes_effect_on_reset(self):
-        """After setting speed, reset should generate a moving path."""
-        env = ShooterEnvContinuous(move_and_shoot=True, speed_min=0.0, speed_max=0.0)
-        obs1, _ = env.reset(seed=42)
-        assert obs1[2] == pytest.approx(0.0, abs=0.01)
-        assert obs1[3] == pytest.approx(0.0, abs=0.01)
-
-        env.set_curriculum_level(2.0, 3.0)
-        obs2, _ = env.reset(seed=43)
-        speed = np.sqrt(obs2[2] ** 2 + obs2[3] ** 2)
-        assert speed > 0.1
-        env.close()
-
-
 class TestGymnasiumCompatibilityMoving:
     def test_check_env_stationary(self):
         """Gymnasium check_env passes for move_and_shoot with zero speed."""

@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FRC Ball Shooter RL Visualization</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        .overlay {
+            position: fixed;
+            color: white;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 12px 20px;
+            backdrop-filter: blur(4px);
+        }
+
+        #top-bar {
+            top: 0;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+        }
+
+        #top-bar .title {
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        #bottom-panel {
+            bottom: 0;
+            left: 0;
+            right: 0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+        }
+
+        .control-row {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin: 6px 0;
+        }
+
+        button {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        button:active {
+            background: rgba(255, 255, 255, 0.35);
+        }
+
+        button.active {
+            background: rgba(100, 150, 255, 0.5);
+            border-color: rgba(100, 150, 255, 0.8);
+        }
+
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-dot.hit {
+            background: #00cc44;
+            box-shadow: 0 0 8px #00cc44;
+        }
+
+        .status-dot.miss {
+            background: #cc2200;
+            box-shadow: 0 0 8px #cc2200;
+        }
+
+        label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        input[type="checkbox"] {
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+        }
+
+        #no-data-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 40px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 18px;
+            display: none;
+        }
+
+        .separator {
+            color: rgba(255, 255, 255, 0.4);
+            margin: 0 8px;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <div id="top-bar" class="overlay">
+        <div class="title">FRC Ball Shooter RL Visualization</div>
+        <div id="hit-rate-display">Hit Rate: --</div>
+        <div id="model-path">Model: --</div>
+    </div>
+
+    <div id="bottom-panel" class="overlay">
+        <div class="control-row">
+            <button id="prev-episode">◀</button>
+            <span id="episode-counter">Episode: -/-</span>
+            <button id="next-episode">▶</button>
+            <span class="separator">|</span>
+            <button id="prev-shot">◀</button>
+            <span id="shot-counter">Shot: -/-</span>
+            <button id="next-shot">▶</button>
+            <span class="separator">|</span>
+            <span id="shot-status" class="status-indicator">
+                <span class="status-dot"></span>
+                <span id="status-text">--</span>
+            </span>
+        </div>
+
+        <div class="control-row">
+            <button id="jump-start">⏮</button>
+            <button id="step-back">◀</button>
+            <button id="play-btn">▶ Play</button>
+            <button id="pause-btn" style="display:none">⏸ Pause</button>
+            <button id="step-forward">▶</button>
+            <button id="jump-end">⏭</button>
+            <span class="separator">|</span>
+            <span>Speed:</span>
+            <button id="speed-1x" class="active">1x</button>
+            <button id="speed-2x">2x</button>
+            <button id="speed-5x">5x</button>
+        </div>
+
+        <div class="control-row">
+            <span id="params-display">Dist: -- | Vel: -- | Elev: -- | Az: --</span>
+        </div>
+
+        <div class="control-row">
+            <label>
+                <input type="checkbox" id="toggle-all-traj" checked>
+                All trajectories
+            </label>
+            <label>
+                <input type="checkbox" id="toggle-path" checked>
+                Robot path
+            </label>
+            <label>
+                <input type="checkbox" id="toggle-grid" checked>
+                Grid
+            </label>
+        </div>
+    </div>
+
+    <div id="no-data-message">
+        <h2>No Data Loaded</h2>
+        <p>This template needs to be processed with episode data.</p>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // Data injected by Python script
+        const DATA = /*DATA_PLACEHOLDER*/null;
+
+        if (!DATA) {
+            document.getElementById('no-data-message').style.display = 'block';
+            throw new Error('No data provided');
+        }
+
+        // State management
+        const state = {
+            episode: 0,
+            shot: 0,
+            playing: false,
+            speed: 1,
+            progress: 0,
+        };
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+
+        const camera = new THREE.PerspectiveCamera(
+            60,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            100
+        );
+        camera.position.set(8, 6, -2);
+        camera.lookAt(4, 1, 4);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(4, 1, 4);
+        controls.update();
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(10, 15, 5);
+        directionalLight.castShadow = true;
+        scene.add(directionalLight);
+
+        // Ground plane (16.5m × 8.2m)
+        const groundGeometry = new THREE.PlaneGeometry(16.5, 8.2);
+        const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x4a7c59 });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.set(16.5 / 2, 0, 8.2 / 2);
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Alliance zone (4.03m × 8.07m)
+        const allianceGeometry = new THREE.PlaneGeometry(4.03, 8.07);
+        const allianceMaterial = new THREE.MeshLambertMaterial({ color: 0x5a8c69 });
+        const allianceZone = new THREE.Mesh(allianceGeometry, allianceMaterial);
+        allianceZone.rotation.x = -Math.PI / 2;
+        allianceZone.position.set(4.03 / 2, 0.001, 8.2 / 2);
+        scene.add(allianceZone);
+
+        // Grid helper
+        const gridHelper = new THREE.GridHelper(16.5, 16, 0xffffff, 0x666666);
+        gridHelper.position.set(16.5 / 2, 0.002, 8.2 / 2);
+        scene.add(gridHelper);
+
+        // HUB
+        const hubX = DATA.field.hub_x;
+        const hubY = DATA.field.hub_y;
+        const hubHeight = DATA.field.hub_opening_height;
+        const hubRadius = 0.53;
+
+        const hubGeometry = new THREE.CylinderGeometry(hubRadius, hubRadius, hubHeight, 32);
+        const hubMaterial = new THREE.MeshLambertMaterial({
+            color: 0x999999,
+            transparent: true,
+            opacity: 0.3
+        });
+        const hub = new THREE.Mesh(hubGeometry, hubMaterial);
+        hub.position.set(hubX, hubHeight / 2, hubY);
+        scene.add(hub);
+
+        const ringGeometry = new THREE.TorusGeometry(hubRadius, 0.03, 16, 32);
+        const ringMaterial = new THREE.MeshLambertMaterial({ color: 0xff8800 });
+        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        ring.position.set(hubX, hubHeight, hubY);
+        ring.rotation.x = Math.PI / 2;
+        scene.add(ring);
+
+        // Robot (group)
+        const robot = new THREE.Group();
+
+        const chassisGeometry = new THREE.BoxGeometry(0.5, 0.25, 0.5);
+        const chassisMaterial = new THREE.MeshLambertMaterial({ color: 0x0066cc });
+        const chassis = new THREE.Mesh(chassisGeometry, chassisMaterial);
+        chassis.castShadow = true;
+        robot.add(chassis);
+
+        const barrelGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.3, 16);
+        const barrelMaterial = new THREE.MeshLambertMaterial({ color: 0x333333 });
+        const barrel = new THREE.Mesh(barrelGeometry, barrelMaterial);
+        barrel.position.set(0, 0, 0);
+        robot.add(barrel);
+
+        scene.add(robot);
+
+        // Ball
+        const ballGeometry = new THREE.SphereGeometry(0.075, 16, 16);
+        const ballMaterial = new THREE.MeshLambertMaterial({ color: 0xff6600 });
+        const ball = new THREE.Mesh(ballGeometry, ballMaterial);
+        ball.visible = false;
+        ball.castShadow = true;
+        scene.add(ball);
+
+        // Trajectory lines (will be created dynamically)
+        let activeTrajectoryLine = null;
+        const allTrajectoryLines = [];
+
+        // Robot path line
+        let robotPathLine = null;
+
+        // Utility functions
+        function lerp(a, b, t) {
+            return a + (b - a) * t;
+        }
+
+        function updateBall() {
+            const shot = DATA.episodes[state.episode].shots[state.shot];
+            const traj = shot.trajectory;
+            const t = state.progress;
+
+            if (traj.x.length === 0) {
+                ball.visible = false;
+                return;
+            }
+
+            const idx = Math.floor(t * (traj.x.length - 1));
+            const frac = t * (traj.x.length - 1) - idx;
+            const next = Math.min(idx + 1, traj.x.length - 1);
+
+            ball.position.set(
+                lerp(traj.x[idx], traj.x[next], frac),
+                lerp(traj.z[idx], traj.z[next], frac),
+                lerp(traj.y[idx], traj.y[next], frac)
+            );
+            ball.visible = true;
+        }
+
+        function createTrajectoryLine(trajectory, color, opacity = 1.0) {
+            const points = [];
+            for (let i = 0; i < trajectory.x.length; i++) {
+                points.push(new THREE.Vector3(
+                    trajectory.x[i],
+                    trajectory.z[i],
+                    trajectory.y[i]
+                ));
+            }
+
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({
+                color: color,
+                transparent: opacity < 1.0,
+                opacity: opacity
+            });
+            return new THREE.Line(geometry, material);
+        }
+
+        function showShot(episodeIdx, shotIdx) {
+            state.episode = episodeIdx;
+            state.shot = shotIdx;
+            state.progress = 0;
+
+            const episode = DATA.episodes[episodeIdx];
+            const shot = episode.shots[shotIdx];
+
+            // Position robot
+            robot.position.set(shot.robot_x, 0.125, shot.robot_y);
+
+            // Orient robot turret (azimuth)
+            const azimuthRad = (shot.azimuth_deg || 0) * Math.PI / 180;
+            robot.rotation.y = azimuthRad;
+
+            // Orient barrel (elevation)
+            const elevationRad = (shot.elevation_deg || 0) * Math.PI / 180;
+            barrel.rotation.z = -elevationRad;
+            barrel.position.set(
+                Math.sin(elevationRad) * 0.15,
+                Math.cos(elevationRad) * 0.15,
+                0
+            );
+
+            // Clear old active trajectory
+            if (activeTrajectoryLine) {
+                scene.remove(activeTrajectoryLine);
+                activeTrajectoryLine.geometry.dispose();
+                activeTrajectoryLine.material.dispose();
+            }
+
+            // Create new active trajectory
+            const color = shot.hit ? 0x00cc44 : 0xcc2200;
+            activeTrajectoryLine = createTrajectoryLine(shot.trajectory, color, 1.0);
+            scene.add(activeTrajectoryLine);
+
+            // Update all trajectories if enabled
+            updateAllTrajectories();
+
+            // Update robot path if MAS mode
+            updateRobotPath();
+
+            // Update UI
+            updateUI();
+
+            // Hide ball initially
+            ball.visible = false;
+        }
+
+        function updateAllTrajectories() {
+            // Clear old trajectory lines
+            allTrajectoryLines.forEach(line => {
+                scene.remove(line);
+                line.geometry.dispose();
+                line.material.dispose();
+            });
+            allTrajectoryLines.length = 0;
+
+            if (!document.getElementById('toggle-all-traj').checked) {
+                return;
+            }
+
+            const episode = DATA.episodes[state.episode];
+            episode.shots.forEach((shot, idx) => {
+                if (idx === state.shot) return; // Skip current shot
+
+                const color = shot.hit ? 0x00cc44 : 0xcc2200;
+                const line = createTrajectoryLine(shot.trajectory, color, 0.3);
+                allTrajectoryLines.push(line);
+                scene.add(line);
+            });
+        }
+
+        function updateRobotPath() {
+            // Clear old path
+            if (robotPathLine) {
+                scene.remove(robotPathLine);
+                robotPathLine.geometry.dispose();
+                robotPathLine.material.dispose();
+                robotPathLine = null;
+            }
+
+            if (!document.getElementById('toggle-path').checked) {
+                return;
+            }
+
+            const episode = DATA.episodes[state.episode];
+            if (!episode.path) return;
+
+            const points = [];
+            const pathX = episode.path.x;
+            const pathY = episode.path.y;
+            if (!pathX || !pathY || pathX.length === 0) return;
+
+            for (let i = 0; i < pathX.length; i++) {
+                points.push(new THREE.Vector3(
+                    pathX[i],
+                    0.005,
+                    pathY[i]
+                ));
+            }
+
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineDashedMaterial({
+                color: 0xffff00,
+                dashSize: 0.1,
+                gapSize: 0.05
+            });
+            robotPathLine = new THREE.Line(geometry, material);
+            robotPathLine.computeLineDistances();
+            scene.add(robotPathLine);
+        }
+
+        function updateUI() {
+            const episode = DATA.episodes[state.episode];
+            const shot = episode.shots[state.shot];
+
+            // Episode counter
+            document.getElementById('episode-counter').textContent =
+                `Episode: ${state.episode + 1}/${DATA.episodes.length}`;
+
+            // Shot counter
+            document.getElementById('shot-counter').textContent =
+                `Shot: ${state.shot + 1}/${episode.shots.length}`;
+
+            // Hit/Miss status
+            const statusDot = document.querySelector('.status-dot');
+            const statusText = document.getElementById('status-text');
+            if (shot.hit) {
+                statusDot.className = 'status-dot hit';
+                statusText.textContent = 'HIT';
+                statusText.style.color = '#00cc44';
+            } else {
+                statusDot.className = 'status-dot miss';
+                statusText.textContent = 'MISS';
+                statusText.style.color = '#cc2200';
+            }
+
+            // Parameters
+            const dist = shot.distance?.toFixed(1) || '--';
+            const vel = shot.velocity?.toFixed(1) || '--';
+            const elev = shot.elevation_deg?.toFixed(1) || '--';
+            const az = shot.azimuth_deg?.toFixed(1) || '--';
+            document.getElementById('params-display').textContent =
+                `Dist: ${dist}m | Vel: ${vel} m/s | Elev: ${elev}° | Az: ${az}°`;
+        }
+
+        function nextShot() {
+            const episode = DATA.episodes[state.episode];
+            if (state.shot < episode.shots.length - 1) {
+                showShot(state.episode, state.shot + 1);
+            } else if (state.episode < DATA.episodes.length - 1) {
+                showShot(state.episode + 1, 0);
+            }
+        }
+
+        function prevShot() {
+            if (state.shot > 0) {
+                showShot(state.episode, state.shot - 1);
+            } else if (state.episode > 0) {
+                const prevEp = state.episode - 1;
+                showShot(prevEp, DATA.episodes[prevEp].shots.length - 1);
+            }
+        }
+
+        function nextEpisode() {
+            if (state.episode < DATA.episodes.length - 1) {
+                showShot(state.episode + 1, 0);
+            }
+        }
+
+        function prevEpisode() {
+            if (state.episode > 0) {
+                showShot(state.episode - 1, 0);
+            }
+        }
+
+        function jumpToStart() {
+            showShot(0, 0);
+        }
+
+        function jumpToEnd() {
+            const lastEp = DATA.episodes.length - 1;
+            const lastShot = DATA.episodes[lastEp].shots.length - 1;
+            showShot(lastEp, lastShot);
+        }
+
+        function showPlayBtn() {
+            document.getElementById('play-btn').style.display = '';
+            document.getElementById('pause-btn').style.display = 'none';
+        }
+
+        function showPauseBtn() {
+            document.getElementById('play-btn').style.display = 'none';
+            document.getElementById('pause-btn').style.display = '';
+        }
+
+        function play() {
+            state.playing = true;
+            showPauseBtn();
+        }
+
+        function pause() {
+            state.playing = false;
+            showPlayBtn();
+        }
+
+        function togglePlay() {
+            if (state.playing) { pause(); } else { play(); }
+        }
+
+        function setSpeed(speed) {
+            state.speed = speed;
+            document.querySelectorAll('[id^="speed-"]').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById(`speed-${speed}x`).classList.add('active');
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (state.playing) {
+                state.progress += 0.02 * state.speed;
+                if (state.progress >= 1) {
+                    state.progress = 1;
+                    pause();
+
+                    // Auto-advance after brief delay
+                    setTimeout(() => {
+                        const episode = DATA.episodes[state.episode];
+                        if (state.shot < episode.shots.length - 1 ||
+                            state.episode < DATA.episodes.length - 1) {
+                            nextShot();
+                            play();
+                        }
+                    }, 200 / state.speed);
+                }
+                updateBall();
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Event listeners
+        document.getElementById('prev-episode').addEventListener('click', prevEpisode);
+        document.getElementById('next-episode').addEventListener('click', nextEpisode);
+        document.getElementById('prev-shot').addEventListener('click', () => { pause(); prevShot(); });
+        document.getElementById('next-shot').addEventListener('click', () => { pause(); nextShot(); });
+        document.getElementById('jump-start').addEventListener('click', jumpToStart);
+        document.getElementById('step-back').addEventListener('click', () => { pause(); prevShot(); });
+        document.getElementById('play-btn').addEventListener('click', play);
+        document.getElementById('pause-btn').addEventListener('click', pause);
+        document.getElementById('step-forward').addEventListener('click', () => { pause(); nextShot(); });
+        document.getElementById('jump-end').addEventListener('click', jumpToEnd);
+
+        document.getElementById('speed-1x').addEventListener('click', () => setSpeed(1));
+        document.getElementById('speed-2x').addEventListener('click', () => setSpeed(2));
+        document.getElementById('speed-5x').addEventListener('click', () => setSpeed(5));
+
+        document.getElementById('toggle-all-traj').addEventListener('change', updateAllTrajectories);
+        document.getElementById('toggle-path').addEventListener('change', updateRobotPath);
+        document.getElementById('toggle-grid').addEventListener('change', (e) => {
+            gridHelper.visible = e.target.checked;
+        });
+
+        // Keyboard shortcuts
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                togglePlay();
+            } else if (e.code === 'ArrowRight') {
+                e.preventDefault();
+                pause();
+                nextShot();
+            } else if (e.code === 'ArrowLeft') {
+                e.preventDefault();
+                pause();
+                prevShot();
+            } else if (e.code === 'Digit1') {
+                setSpeed(1);
+            } else if (e.code === 'Digit2') {
+                setSpeed(2);
+            } else if (e.code === 'Digit3') {
+                setSpeed(5);
+            }
+        });
+
+        // Window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Initialize UI
+        document.getElementById('hit-rate-display').textContent =
+            `Hit Rate: ${(DATA.metadata.overall_hit_rate * 100).toFixed(1)}%`;
+        document.getElementById('model-path').textContent =
+            `Model: ${DATA.metadata.model_path}`;
+
+        // Show first shot
+        showShot(0, 0);
+
+        // Start animation loop
+        animate();
+    </script>
+</body>
+</html>

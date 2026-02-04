@@ -135,10 +135,19 @@ class TestGenerateStraightLinePath:
         )
 
     def test_minimum_duration_met(self):
-        """Path meets the minimum duration requirement."""
+        """Path meets the minimum duration requirement at low speed."""
         rng = np.random.default_rng(42)
-        path = generate_straight_line_path(rng, speed_min=1.0, speed_max=2.0, min_duration=5.0)
-        assert path.duration() >= 5.0
+        # Use low speed where 3-second paths fit easily in the zone
+        path = generate_straight_line_path(rng, speed_min=0.5, speed_max=1.0, min_duration=3.0)
+        assert path.duration() >= 3.0
+        assert path._speed > 0, "Path should not be a stationary fallback"
+
+    def test_high_speed_path_is_not_stationary(self):
+        """High-speed paths should move (not fall back to stationary)."""
+        rng = np.random.default_rng(42)
+        path = generate_straight_line_path(rng, speed_min=3.0, speed_max=5.0)
+        assert path._speed > 0, "Path should not be a stationary fallback"
+        assert path.duration() > 0
 
     def test_hub_avoidance(self):
         """Path never passes within MIN_DISTANCE_FROM_HUB of the hub."""

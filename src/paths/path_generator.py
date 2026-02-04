@@ -129,6 +129,11 @@ def generate_straight_line_path(
             start_x, start_y, heading=0.0, speed=0.0, path_duration=min_duration
         )
 
+    # Pre-compute zone diagonal for scaling min_duration at high speeds.
+    # Without this, speeds above ~3 m/s almost always fall through to the
+    # stationary fallback because the alliance zone is too small.
+    zone_diagonal = np.sqrt(ALLIANCE_ZONE_DEPTH**2 + ALLIANCE_ZONE_WIDTH**2)
+
     max_attempts = 200
     for _ in range(max_attempts):
         # Random start with margin from walls
@@ -141,6 +146,10 @@ def generate_straight_line_path(
 
         heading = np_random.uniform(-np.pi, np.pi)
         speed = np_random.uniform(speed_min, speed_max)
+
+        # Scale min_duration based on the actual sampled speed so that slow
+        # paths can still be long while fast paths accept shorter durations.
+        effective_min_duration = min(min_duration, zone_diagonal * 0.4 / speed)
 
         vx = speed * np.cos(heading)
         vy = speed * np.sin(heading)
@@ -176,7 +185,7 @@ def generate_straight_line_path(
                 break
 
         duration = min(t_bound, t_hub_limit)
-        if duration >= min_duration:
+        if duration >= effective_min_duration:
             return StraightLinePath(start_x, start_y, heading, speed, duration)
 
     # Fallback: stationary path at a safe position

@@ -183,15 +183,6 @@ class ShooterEnvContinuous(gym.Env):
                 dtype=np.float32,
             )
 
-    def set_curriculum_level(self, speed_min: float, speed_max: float):
-        """Update speed range for curriculum learning.
-
-        Called by CurriculumCallback via env_method(). Changes take effect
-        on the next reset().
-        """
-        self.speed_min = speed_min
-        self.speed_max = speed_max
-
     def reset(self, seed=None, options=None):
         """Reset environment for new episode."""
         super().reset(seed=seed)
