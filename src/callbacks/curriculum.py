@@ -20,9 +20,9 @@ class CurriculumLevel:
 
 
 DEFAULT_CURRICULUM = [
-    CurriculumLevel("stationary", 0.0, 0.0, 0.70),
-    CurriculumLevel("slow", 0.5, 1.0, 0.60),
-    CurriculumLevel("medium", 1.0, 3.0, 0.50),
+    CurriculumLevel("crawl", 0.1, 0.5, 0.70),
+    CurriculumLevel("slow", 0.5, 1.5, 0.60),
+    CurriculumLevel("medium", 1.5, 3.0, 0.50),
     CurriculumLevel("fast", 3.0, 5.0, 0.0),  # terminal level
 ]
 
@@ -117,6 +117,14 @@ class CurriculumCallback(BaseCallback):
                 f"[Curriculum] ADVANCING to level {self.current_level_idx}: "
                 f"{level.name} (speed {level.speed_min}-{level.speed_max} m/s)"
             )
+
+        # Clear replay buffer to prevent stale transitions from the previous
+        # curriculum level from poisoning Q-value estimates. The network weights
+        # are preserved so the agent retains learned physics intuition.
+        if hasattr(self.model, "replay_buffer") and self.model.replay_buffer is not None:
+            self.model.replay_buffer.reset()
+            if self.verbose >= 1:
+                print("[Curriculum] Cleared replay buffer")
 
         # Update all training environments
         training_env = self.model.get_env()

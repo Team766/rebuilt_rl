@@ -16,9 +16,9 @@ class TestCurriculumLevels:
     def test_terminal_level_has_zero_threshold(self):
         assert DEFAULT_CURRICULUM[-1].threshold == 0.0
 
-    def test_first_level_is_stationary(self):
-        assert DEFAULT_CURRICULUM[0].speed_min == 0.0
-        assert DEFAULT_CURRICULUM[0].speed_max == 0.0
+    def test_first_level_is_slow_moving(self):
+        assert DEFAULT_CURRICULUM[0].speed_min > 0.0
+        assert DEFAULT_CURRICULUM[0].speed_max > 0.0
 
 
 class TestCurriculumCallback:
@@ -125,6 +125,20 @@ class TestCurriculumCallback:
             "set_curriculum_level", 1.0, 2.0
         )
 
+    def test_replay_buffer_cleared_on_advance(self):
+        levels = [
+            CurriculumLevel("level0", 0.0, 0.0, 0.50),
+            CurriculumLevel("level1", 1.0, 2.0, 0.0),
+        ]
+        cb = self._make_callback(eval_window=1, levels=levels)
+        cb.parent.eval_env = MagicMock()
+        cb.parent.last_mean_reward = 50.0
+        cb.model.replay_buffer = MagicMock()
+        with patch.object(type(cb), "logger", new_callable=PropertyMock) as mock_log:
+            mock_log.return_value = MagicMock()
+            cb._on_step()
+        cb.model.replay_buffer.reset.assert_called_once()
+
     def test_logs_to_tensorboard(self):
         cb = self._make_callback()
         cb.parent.last_mean_reward = 25.0
@@ -133,4 +147,4 @@ class TestCurriculumCallback:
             mock_log.return_value = logger_mock
             cb._on_step()
         logger_mock.record.assert_any_call("curriculum/level", 0)
-        logger_mock.record.assert_any_call("curriculum/level_name", "stationary")
+        logger_mock.record.assert_any_call("curriculum/level_name", "crawl")

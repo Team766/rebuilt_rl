@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import numpy as np
 import torch
 from stable_baselines3 import DQN, PPO, SAC
+
+from src.sac_logging import LoggingSAC
 from stable_baselines3.common.callbacks import (
     CallbackList,
     CheckpointCallback,
@@ -147,7 +149,7 @@ def train(
     print(f"Using device: {device}")
 
     # Resume from checkpoint or create new model
-    algo_cls = {"PPO": PPO, "SAC": SAC, "DQN": DQN}[algorithm.upper()]
+    algo_cls = {"PPO": PPO, "SAC": LoggingSAC, "DQN": DQN}[algorithm.upper()]
     if resume:
         print(f"Resuming from: {resume}")
         model = algo_cls.load(
@@ -193,18 +195,23 @@ def train(
                 device=device,
             )
         elif algorithm.upper() == "SAC":
-            model = SAC(
+            # target_entropy=-6 (2x default of -dim(A)=-3) because the optimal
+            # policy is nearly deterministic: given distance+bearing there is one
+            # correct launch configuration.  The default target drives entropy
+            # back up after convergence, degrading the learned policy.
+            model = LoggingSAC(
                 "MlpPolicy",
                 env,
                 learning_rate=learning_rate,
                 buffer_size=500_000,
-                learning_starts=500,
-                batch_size=4096,
+                learning_starts=1000,
+                batch_size=256,
                 tau=0.005,
                 gamma=0.99,
                 train_freq=1,
-                gradient_steps=4,
+                gradient_steps=1,
                 ent_coef="auto",
+                target_entropy=-6.0,
                 policy_kwargs=sac_policy_kwargs,
                 tensorboard_log=str(log_path),
                 verbose=verbose,
