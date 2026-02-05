@@ -11,9 +11,11 @@ from ..config import (
     ANGLE_MIN_DEG,
     AZIMUTH_MAX_DEG,
     AZIMUTH_MIN_DEG,
+    BALL_DIAMETER,
     DEFAULT_SHOT_INTERVAL,
     HUB_DISTANCE_FROM_WALL,
     HUB_OPENING_HALF_WIDTH,
+    HUB_OPENING_HEIGHT,
     MIN_DISTANCE_FROM_HUB,
     REWARD_HIT_BASE,
     REWARD_HIT_CENTER,
@@ -317,13 +319,14 @@ class ShooterEnvContinuous(gym.Env):
             normalized_miss = min(result.total_miss_distance / max_miss, 1.0)
             reward = REWARD_MISS_SCALE * normalized_miss
 
-        # Penalize excessive peak height to discourage mortar-style high-arc shots.
-        # No penalty below 4m (normal flat shots and close-range lobs).
-        # -0.2 per meter above 4m (a 10m peak costs -1.2, killing the hit reward).
+        # Penalize peak height above hub opening + 2 ball diameters buffer.
+        # Continuous gradient: flatter is always better, but close-range lobs
+        # are fine since their excess is small. -0.1 per meter of excess.
         traj_z = getattr(result, "trajectory_z", result.trajectory_y)
         peak_height = float(np.max(traj_z))
-        excess_height = max(0.0, peak_height - 4.0)
-        reward -= 0.2 * excess_height
+        height_baseline = HUB_OPENING_HEIGHT + 2 * BALL_DIAMETER
+        excess_height = max(0.0, peak_height - height_baseline)
+        reward -= 0.1 * excess_height
 
         return reward
 
