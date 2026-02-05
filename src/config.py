@@ -53,9 +53,10 @@ ANGLE_STEP_DEG = (ANGLE_MAX_DEG - ANGLE_MIN_DEG) / (ANGLE_BINS - 1)
 AZIMUTH_STEP_DEG = (AZIMUTH_MAX_DEG - AZIMUTH_MIN_DEG) / (AZIMUTH_BINS - 1)
 
 # HUB entry bounds (accounting for ball radius)
-# Ball center must be within these heights for clean entry
-HUB_ENTRY_MIN = HUB_OPENING_HEIGHT - HUB_OPENING_HALF_WIDTH + BALL_RADIUS  # ~1.305m
-HUB_ENTRY_MAX = HUB_OPENING_HEIGHT + HUB_OPENING_HALF_WIDTH - BALL_RADIUS  # ~2.285m
+# Ball enters from above through a top opening at HUB_OPENING_HEIGHT.
+# Min: ball center must be above the rim so the bottom clears it.
+# Max: no upper bound -- any descending ball above the rim will fall in.
+HUB_ENTRY_MIN = HUB_OPENING_HEIGHT + BALL_RADIUS  # ~1.905m
 
 # Reward shaping
 REWARD_HIT_BASE = 1.0      # base reward for hitting target

@@ -199,6 +199,7 @@ class ShooterEnvContinuous(gym.Env):
                 self.np_random,
                 speed_min=self.speed_min,
                 speed_max=self.speed_max,
+                path_duration=self.shots_per_episode * self.shot_interval,
             )
             self.path_time = 0.0
             self._update_position_from_path()
@@ -255,7 +256,7 @@ class ShooterEnvContinuous(gym.Env):
             self.episode_hits += 1
 
         # Compute reward
-        reward = self._compute_reward(result)
+        reward = self._compute_reward(result, velocity)
 
         # Increment shot counter
         self.current_shot += 1
@@ -304,7 +305,7 @@ class ShooterEnvContinuous(gym.Env):
 
         return observation, reward, terminated, truncated, info
 
-    def _compute_reward(self, result) -> float:
+    def _compute_reward(self, result, velocity: float) -> float:
         """Compute shaped reward based on 3D trajectory result."""
         if result.hit:
             max_center_dist = np.sqrt(2) * HUB_OPENING_HALF_WIDTH
@@ -315,6 +316,11 @@ class ShooterEnvContinuous(gym.Env):
             max_miss = 5.0
             normalized_miss = min(result.total_miss_distance / max_miss, 1.0)
             reward = REWARD_MISS_SCALE * normalized_miss
+
+        # Penalize excessive velocity to discourage high-arc mortar-style shots.
+        # Scales from 0 (at VELOCITY_MIN) to -0.3 (at VELOCITY_MAX).
+        velocity_fraction = (velocity - VELOCITY_MIN) / (VELOCITY_MAX - VELOCITY_MIN)
+        reward -= 0.3 * velocity_fraction
 
         return reward
 

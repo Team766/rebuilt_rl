@@ -105,7 +105,7 @@ rebuilt_rl/
 │   ├── env/
 │   │   ├── shooter_env.py     # Discrete action environments (2D, 3D)
 │   │   └── shooter_env_continuous.py  # Continuous action environment (supports move-and-shoot)
-│   ├── paths/                 # Path generation for move-and-shoot mode
+│   ├── paths/                 # Bouncing path generation for move-and-shoot mode
 │   ├── callbacks/
 │   └── physics/
 │       └── projectile.py      # 2D/3D trajectory simulation with air resistance

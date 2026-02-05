@@ -64,7 +64,7 @@ The codebase has four layers with strict dependency direction: Physics -> Enviro
 
 **`src/config.py`** - Single source of truth for all game constants (field dimensions, HUB specs, ball properties), action space definitions, reward parameters, and bin-to-value conversion functions. All action space encoding/decoding lives here.
 
-**`src/physics/projectile.py`** - Trajectory simulation engine with no RL dependencies. Uses Euler integration (dt=0.001s) for 2D and 3D trajectories. Supports optional quadratic air drag. Returns `TrajectoryResult`/`TrajectoryResult3D`/`TrajectoryResult3DMoving` dataclass-style objects. Hub entry validation requires the ball to be descending (vy < 0) and within the opening bounds. `compute_trajectory_3d_moving()` does full 3D Euler integration with robot velocity inheritance for move-and-shoot mode.
+**`src/physics/projectile.py`** - Trajectory simulation engine with no RL dependencies. Uses Euler integration (dt=0.001s) for 2D and 3D trajectories. Supports optional quadratic air drag. Returns `TrajectoryResult`/`TrajectoryResult3D`/`TrajectoryResult3DMoving` dataclass-style objects. 3D hit detection uses plane-crossing: the trajectory is integrated until the ball descends through z=HUB_OPENING_HEIGHT, then the (x,y) landing position is checked against the hub circle (radius = HUB_OPENING_HALF_WIDTH - BALL_RADIUS). `compute_trajectory_3d_moving()` does full 3D Euler integration with robot velocity inheritance for move-and-shoot mode.
 
 **`src/env/`** - Three Gymnasium environment variants sharing the same physics:
 - `ShooterEnv` (2D discrete): obs=[distance], 150 actions, single-shot episodes
@@ -73,7 +73,7 @@ The codebase has four layers with strict dependency direction: Physics -> Enviro
 
 All environments use minimal observations (distance + bearing, not absolute position) so the agent generalizes across field positions. Reward shaping: +1.0 to +2.0 for hits (with center accuracy bonus), -0.5 to 0 for misses (scaled by distance).
 
-**`src/paths/`** - Path generation for move-and-shoot mode. `RobotPath` ABC with `StraightLinePath` implementation. Paths stay within alliance zone and maintain distance from hub. `generate_straight_line_path()` creates random valid paths.
+**`src/paths/`** - Path generation for move-and-shoot mode. `RobotPath` ABC with `BouncingLinePath` (elastically bounces off zone walls) and `StraightLinePath` (stationary only). `generate_path()` creates random valid paths that keep the robot moving for the full episode.
 
 **`src/sac_logging.py`** - `LoggingSAC` subclass of SB3's SAC. Logs actor/critic gradient norms per training step to TensorBoard for diagnostics. Applies gradient clipping (max norm 1.0) on both actor and critic to prevent Q-value divergence.
 
@@ -90,5 +90,5 @@ All environments use minimal observations (distance + bearing, not absolute posi
 - Air resistance is optional (`--air-resistance` flag) and uses realistic quadratic drag
 - Best models are saved at `models/*/best/best_model.zip` (not final_model.zip, which may be degraded)
 - CI replaces GPU PyTorch with CPU-only version since GitHub Actions has no GPU
-- Move-and-shoot (`--move-and-shoot`) requires `--env-type continuous`. Uses 4D observations [distance, bearing, vx, vy]. Robot velocity is added to ball launch velocity (realistic physics). Path durations are limited by alliance zone geometry; the robot stops when the path ends. Use `--speed-min` and `--speed-max` to set the robot speed range.
+- Move-and-shoot (`--move-and-shoot`) requires `--env-type continuous`. Uses 4D observations [distance, bearing, vx, vy]. Robot velocity is added to ball launch velocity (realistic physics). The robot bounces elastically off zone walls (triangle-wave folding), staying in motion for the entire episode. Use `--speed-min` and `--speed-max` to set the robot speed range.
 - SAC hyperparameters: `batch_size=256`, `gradient_steps=1`, `target_entropy=-6.0`. Larger batch sizes and more gradient steps cause critic Q-value divergence, especially in move-and-shoot mode. The low target entropy allows the policy to stay deterministic after convergence (default of -3 drives entropy back up, degrading a converged policy). Gradient clipping (max norm 1.0) is applied via `LoggingSAC`.
