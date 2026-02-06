@@ -217,7 +217,7 @@ def main():
         "--output", type=str, default="visualization.html", help="Output HTML file path"
     )
     parser.add_argument(
-        "--no-browser", action="store_true", help="Don't auto-open in browser"
+        "--open-browser", action="store_true", help="Auto-open visualization in browser"
     )
 
     args = parser.parse_args()
@@ -310,8 +310,8 @@ def main():
     print(f"Air resistance: {args.air_resistance}")
     print("=" * 60)
 
-    # Open in browser
-    if not args.no_browser:
+    # Open in browser (only if explicitly requested)
+    if args.open_browser:
         try:
             webbrowser.open(f"file://{output_path.absolute()}")
             print("\nOpening visualization in browser...")
