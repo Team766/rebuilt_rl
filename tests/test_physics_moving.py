@@ -229,3 +229,68 @@ class TestAirResistanceWithMoving:
         assert r_still_no_drag.height_at_target != pytest.approx(
             r_moving_drag.height_at_target, abs=0.1
         )
+
+
+class TestWallCollision:
+    """Test that balls entering the hub cylinder from the side are correctly detected as misses."""
+
+    def test_very_close_shot_wall_collision(self):
+        """A shot from very close to hub that enters the cylinder from the side should miss.
+
+        At 0.5m distance with a steep angle, the ball enters the hub cylinder
+        while still at launch height (below hub opening), triggering wall collision.
+        """
+        result = compute_trajectory_3d_moving(
+            launch_velocity=5.66,
+            elevation=np.deg2rad(78.88),
+            azimuth=np.deg2rad(0),
+            target_distance=0.5,  # Very close - enters cylinder immediately
+            target_bearing=np.deg2rad(0),
+            robot_vx=0.0,
+            robot_vy=0.0,
+        )
+        # Ball enters cylinder at launch height (0.5m) - wall collision
+        assert result.hit is False
+
+    def test_close_shot_wall_collision(self):
+        """A shot from 0.7m that enters cylinder below hub height should miss."""
+        result = compute_trajectory_3d_moving(
+            launch_velocity=5.66,
+            elevation=np.deg2rad(78.88),
+            azimuth=np.deg2rad(0),
+            target_distance=0.7,  # Close enough to enter cylinder below hub height
+            target_bearing=np.deg2rad(0),
+            robot_vx=0.0,
+            robot_vy=0.0,
+        )
+        # Ball enters cylinder at ~1.25m (below hub height 1.83m) - wall collision
+        assert result.hit is False
+
+    def test_shot_entering_from_above_is_hit(self):
+        """A shot that enters the cylinder from above (z >= hub height) is valid."""
+        result = compute_trajectory_3d_moving(
+            launch_velocity=5.66,
+            elevation=np.deg2rad(78.88),
+            azimuth=np.deg2rad(0),
+            target_distance=0.92,  # Far enough to enter cylinder from above
+            target_bearing=np.deg2rad(0),
+            robot_vx=0.0,
+            robot_vy=0.0,
+        )
+        # Ball enters cylinder at ~1.86m (above hub height 1.83m) - valid entry
+        assert result.hit is True
+
+    def test_normal_descending_shot_is_hit(self):
+        """A normal shot that descends through the top should still be a hit."""
+        # Standard shot from moderate distance - well-aimed
+        result = compute_trajectory_3d_moving(
+            launch_velocity=8.3,
+            elevation=np.deg2rad(70),
+            azimuth=np.deg2rad(30),
+            target_distance=4.0,
+            target_bearing=np.deg2rad(30),
+            robot_vx=0.0,
+            robot_vy=0.0,
+        )
+        # Normal descending shot should hit
+        assert result.hit is True

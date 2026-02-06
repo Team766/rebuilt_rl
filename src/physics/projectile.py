@@ -396,13 +396,15 @@ def compute_trajectory_3d_moving(
     vz_at_target = None
     lateral_at_target = None
 
-    # Track when ball descends through hub opening plane
-    hub_cross_x = None
-    hub_cross_y = None
-
-    # Track if ball collides with hub cylinder walls (hitbox collision)
-    # Hub is a cylinder from z=0 to z=HUB_OPENING_HEIGHT, ball can only enter from top
-    hub_collision = False
+    # Hit detection: the hub is a cylinder with top surface at HUB_OPENING_HEIGHT.
+    # - Ball scores by descending through the top surface while inside the radius.
+    # - Ball hitting the cylindrical walls (entering radius at z < hub height) is a miss.
+    # Wall collision = ball ENTERS the radius while z < HUB_OPENING_HEIGHT.
+    # A ball that enters from above (z >= hub height) and descends through is valid.
+    wall_collision = False
+    inside_radius = False  # Track if ball has ever been inside the cylinder radius
+    descending_cross_x = None
+    descending_cross_y = None
 
     prev_d_along = 0.0
     prev_x, prev_y, prev_z, prev_vz = x, y, z, vz
@@ -447,24 +449,33 @@ def compute_trajectory_3d_moving(
             cross_y = prev_y + frac * (y - prev_y)
             lateral_at_target = -cross_x * sin_b + cross_y * cos_b
 
-        # Hub hitbox collision detection.
-        # The hub is a solid cylinder from z=0 to z=HUB_OPENING_HEIGHT.
-        # Ball collides if it enters the cylinder from the side while ASCENDING (vz > 0).
-        # Descending balls (vz < 0) are allowed to enter through the top opening.
-        if not hub_collision and vz > 0:
-            dx_cyl = x - hub_x_rel
-            dy_cyl = y - hub_y_rel
-            cyl_dist = np.sqrt(dx_cyl * dx_cyl + dy_cyl * dy_cyl)
-            # Ball collides with hub if inside radius while going up through hub height
-            if cyl_dist <= HUB_OPENING_HALF_WIDTH and z >= HUB_OPENING_HEIGHT:
-                hub_collision = True
+        # Wall collision check: ball ENTERS the hub cylinder radius at z < hub opening height.
+        # A ball entering from above (z >= hub height) is allowed to descend through the opening.
+        dx_hub = x - hub_x_rel
+        dy_hub = y - hub_y_rel
+        dist_from_hub = np.sqrt(dx_hub * dx_hub + dy_hub * dy_hub)
+        currently_inside = dist_from_hub <= HUB_OPENING_HALF_WIDTH
 
-        # Detect descending crossing of hub opening plane (z = HUB_OPENING_HEIGHT)
-        if hub_cross_x is None and prev_z >= HUB_OPENING_HEIGHT and z < HUB_OPENING_HEIGHT:
+        if not inside_radius and currently_inside:
+            # Ball just entered the cylinder radius - check at what height
+            if z < HUB_OPENING_HEIGHT:
+                # Entered from the side (below top surface) - wall collision
+                wall_collision = True
+            inside_radius = True
+        elif inside_radius and not currently_inside:
+            # Ball exited the radius - reset for potential re-entry
+            inside_radius = False
+
+        # Detect descending crossing of hub opening plane (z = HUB_OPENING_HEIGHT).
+        # This is where valid entries (scoring) can occur.
+        if descending_cross_x is None and prev_z >= HUB_OPENING_HEIGHT > z:
             dz = prev_z - z
-            frac_h = (prev_z - HUB_OPENING_HEIGHT) / dz if dz > 0 else 0.0
-            hub_cross_x = prev_x + frac_h * (x - prev_x)
-            hub_cross_y = prev_y + frac_h * (y - prev_y)
+            if dz > 0:
+                frac_h = (prev_z - HUB_OPENING_HEIGHT) / dz
+            else:
+                frac_h = 0.0
+            descending_cross_x = prev_x + frac_h * (x - prev_x)
+            descending_cross_y = prev_y + frac_h * (y - prev_y)
 
         prev_d_along = d_along
         prev_x, prev_y, prev_z, prev_vz = x, y, z, vz
@@ -479,31 +490,36 @@ def compute_trajectory_3d_moving(
         vz_at_target = -abs(vz) if vz != 0 else -1.0
         lateral_at_target = 0.0
 
-    # Hit detection based on hub-opening-plane crossing
+    # Hit detection: ball must descend through top surface without hitting walls first.
     effective_radius = HUB_OPENING_HALF_WIDTH - BALL_RADIUS
 
-    if hub_collision:
-        # Ball collided with hub cylinder walls — miss
+    if wall_collision:
+        # Ball hit the cylindrical wall of the hub — miss
         hit = False
         lateral_miss_dist = 0.0
-        total_miss_distance = 1.0  # Penalty for hub collision
+        total_miss_distance = 1.0
         center_distance = 0.0
         vertical_miss = 0.0
-        lateral_offset = 0.0
-    elif hub_cross_x is not None:
-        # Ball descended through hub height — check if within opening circle
-        dx_hub = hub_cross_x - hub_x_rel
-        dy_hub = hub_cross_y - hub_y_rel
+        lateral_offset = lateral_at_target if lateral_at_target is not None else 0.0
+    elif descending_cross_x is not None:
+        dx_hub = descending_cross_x - hub_x_rel
+        dy_hub = descending_cross_y - hub_y_rel
         landing_dist = np.sqrt(dx_hub * dx_hub + dy_hub * dy_hub)
 
-        hit = bool(landing_dist <= effective_radius)
-        lateral_miss_dist = max(0.0, float(landing_dist) - effective_radius)
-        total_miss_distance = 0.0 if hit else lateral_miss_dist
+        if landing_dist <= effective_radius:
+            # Valid descending entry within radius — hit
+            hit = True
+            lateral_miss_dist = 0.0
+            total_miss_distance = 0.0
+        else:
+            # Descending but outside radius — miss
+            hit = False
+            lateral_miss_dist = float(landing_dist) - effective_radius
+            total_miss_distance = lateral_miss_dist
+
         center_distance = float(landing_dist)
         vertical_miss = 0.0
-
-        # Lateral offset: perpendicular to bearing at crossing point
-        lateral_offset = -hub_cross_x * sin_b + hub_cross_y * cos_b
+        lateral_offset = -descending_cross_x * sin_b + descending_cross_y * cos_b
     else:
         # Ball never descended through hub height — miss
         hit = False
