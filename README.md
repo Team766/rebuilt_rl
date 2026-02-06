@@ -94,6 +94,25 @@ python scripts/train.py --algorithm SAC --env-type continuous --resume models/SA
 python scripts/evaluate.py models/SAC_CONT_*/best/best_model.zip --env-type continuous --episodes 100
 ```
 
+## Visualization
+
+Generate interactive 3D visualizations of trained models in the browser:
+
+```bash
+# Visualize stationary shooting
+python scripts/visualize.py models/SAC_CONT_*/best/best_model.zip --env-type continuous --episodes 5
+
+# Visualize move-and-shoot (match speed range to training)
+python scripts/visualize.py models/SAC_CONT_MAS_*/best/best_model.zip \
+    --env-type continuous --move-and-shoot --air-resistance \
+    --speed-min 0.1 --speed-max 0.5 --episodes 5
+
+# Open in browser automatically
+python scripts/visualize.py models/SAC_CONT_*/best/best_model.zip --open-browser
+```
+
+The visualization shows animated ball trajectories, robot position, and the HUB target with playback controls.
+
 ## Project Structure
 
 ```
@@ -111,7 +130,9 @@ rebuilt_rl/
 │       └── projectile.py      # 2D/3D trajectory simulation with air resistance
 ├── scripts/
 │   ├── train.py               # Training script
-│   └── evaluate.py            # Evaluation script
+│   ├── evaluate.py            # Evaluation script
+│   ├── visualize.py           # 3D visualization generator
+│   └── visualize_template.html # Three.js visualization template
 ├── docs/                      # Documentation
 └── tests/                     # Unit tests
 ```
