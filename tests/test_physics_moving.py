@@ -54,19 +54,21 @@ class TestZeroVelocityEquivalence:
         )
 
     def test_lateral_offset_matches(self):
+        # Use a trajectory that misses laterally but doesn't collide with hub.
+        # Large azimuth offset so ball passes well to the side of the hub.
         result_stationary = compute_trajectory_3d(
-            velocity=15.0,
-            elevation=np.deg2rad(45),
-            azimuth=np.deg2rad(15),
+            velocity=12.0,
+            elevation=np.deg2rad(40),
+            azimuth=np.deg2rad(30),  # Far off from bearing
             target_distance=5.0,
-            target_bearing=np.deg2rad(10),
+            target_bearing=np.deg2rad(0),
         )
         result_moving = compute_trajectory_3d_moving(
-            launch_velocity=15.0,
-            elevation=np.deg2rad(45),
-            azimuth=np.deg2rad(15),
+            launch_velocity=12.0,
+            elevation=np.deg2rad(40),
+            azimuth=np.deg2rad(30),
             target_distance=5.0,
-            target_bearing=np.deg2rad(10),
+            target_bearing=np.deg2rad(0),
             robot_vx=0.0,
             robot_vy=0.0,
         )

@@ -400,8 +400,9 @@ def compute_trajectory_3d_moving(
     hub_cross_x = None
     hub_cross_y = None
 
-    # Track if ball collides with hub on the way up (ascending through hub cylinder)
-    ascending_collision = False
+    # Track if ball collides with hub cylinder walls (hitbox collision)
+    # Hub is a cylinder from z=0 to z=HUB_OPENING_HEIGHT, ball can only enter from top
+    hub_collision = False
 
     prev_d_along = 0.0
     prev_x, prev_y, prev_z, prev_vz = x, y, z, vz
@@ -446,19 +447,17 @@ def compute_trajectory_3d_moving(
             cross_y = prev_y + frac * (y - prev_y)
             lateral_at_target = -cross_x * sin_b + cross_y * cos_b
 
-        # Detect ascending crossing of hub opening plane (collision with hub from below)
-        if not ascending_collision and prev_z < HUB_OPENING_HEIGHT <= z:
-            dz = z - prev_z
-            frac_up = (HUB_OPENING_HEIGHT - prev_z) / dz if dz > 0 else 0.0
-            asc_x = prev_x + frac_up * (x - prev_x)
-            asc_y = prev_y + frac_up * (y - prev_y)
-            # Check if ascending crossing is within hub cylinder
-            dx_asc = asc_x - hub_x_rel
-            dy_asc = asc_y - hub_y_rel
-            asc_dist = np.sqrt(dx_asc * dx_asc + dy_asc * dy_asc)
-            effective_radius = HUB_OPENING_HALF_WIDTH - BALL_RADIUS
-            if asc_dist <= effective_radius:
-                ascending_collision = True
+        # Hub hitbox collision detection.
+        # The hub is a solid cylinder from z=0 to z=HUB_OPENING_HEIGHT.
+        # Ball collides if it enters the cylinder from the side while ASCENDING (vz > 0).
+        # Descending balls (vz < 0) are allowed to enter through the top opening.
+        if not hub_collision and vz > 0:
+            dx_cyl = x - hub_x_rel
+            dy_cyl = y - hub_y_rel
+            cyl_dist = np.sqrt(dx_cyl * dx_cyl + dy_cyl * dy_cyl)
+            # Ball collides with hub if inside radius while going up through hub height
+            if cyl_dist <= HUB_OPENING_HALF_WIDTH and z >= HUB_OPENING_HEIGHT:
+                hub_collision = True
 
         # Detect descending crossing of hub opening plane (z = HUB_OPENING_HEIGHT)
         if hub_cross_x is None and prev_z >= HUB_OPENING_HEIGHT and z < HUB_OPENING_HEIGHT:
@@ -483,8 +482,8 @@ def compute_trajectory_3d_moving(
     # Hit detection based on hub-opening-plane crossing
     effective_radius = HUB_OPENING_HALF_WIDTH - BALL_RADIUS
 
-    if ascending_collision:
-        # Ball collided with hub on the way up — miss
+    if hub_collision:
+        # Ball collided with hub cylinder walls — miss
         hit = False
         lateral_miss_dist = 0.0
         total_miss_distance = 1.0  # Penalty for hub collision
