@@ -11,9 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 import torch
-from stable_baselines3 import DQN, PPO, SAC
-
-from src.sac_logging import LoggingSAC
+from stable_baselines3 import DQN, PPO
 from stable_baselines3.common.callbacks import (
     CallbackList,
     CheckpointCallback,
@@ -24,6 +22,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 from src.env.shooter_env import ShooterEnv, ShooterEnv3D
 from src.env.shooter_env_continuous import ShooterEnvContinuous
+from src.sac_logging import LoggingSAC
 
 
 def make_env(
@@ -32,6 +31,8 @@ def make_env(
     air_resistance: bool = False,
     move_and_shoot: bool = False,
     shot_interval: float = 0.5,
+    speed_min: float = 0.0,
+    speed_max: float = 0.0,
 ):
     """Create a single environment instance."""
     def _init():
@@ -42,6 +43,8 @@ def make_env(
                 air_resistance=air_resistance,
                 move_and_shoot=move_and_shoot,
                 shot_interval=shot_interval,
+                speed_min=speed_min,
+                speed_max=speed_max,
             )
         else:
             env = ShooterEnv(air_resistance=air_resistance)
@@ -67,28 +70,11 @@ def train(
     air_resistance: bool = False,
     move_and_shoot: bool = False,
     shot_interval: float = 0.5,
+    speed_min: float = 0.0,
+    speed_max: float = 0.0,
     resume: str | None = None,
 ):
-    """Train the RL agent.
-
-    Args:
-        algorithm: RL algorithm ("PPO", "DQN", or "SAC")
-        total_timesteps: Total training timesteps
-        n_envs: Number of parallel environments
-        seed: Random seed
-        save_dir: Directory to save models
-        log_dir: Directory for tensorboard logs
-        eval_freq: Evaluation frequency (steps)
-        n_eval_episodes: Episodes per evaluation
-        checkpoint_freq: Checkpoint save frequency
-        learning_rate: Learning rate
-        verbose: Verbosity level
-        env_type: "2d" for original env, "3d" for turret aiming, "continuous" for SAC
-        air_resistance: Whether to enable air resistance in physics
-        move_and_shoot: Whether to enable move-and-shoot training with curriculum
-        shot_interval: Seconds between shots in move-and-shoot mode
-        resume: Path to a saved model zip to resume training from
-    """
+    """Train the RL agent."""
     # Set seeds
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -119,6 +105,8 @@ def train(
         air_resistance=air_resistance,
         move_and_shoot=move_and_shoot,
         shot_interval=shot_interval,
+        speed_min=speed_min,
+        speed_max=speed_max,
     )
     if n_envs > 1:
         env = SubprocVecEnv([make_env(seed + i, **env_kwargs) for i in range(n_envs)])
@@ -241,37 +229,16 @@ def train(
             raise ValueError(f"Unknown algorithm: {algorithm}")
 
     # Create callbacks
-    # Curriculum callback for move-and-shoot
-    if move_and_shoot:
-        from src.callbacks.curriculum import CurriculumCallback
-
-        curriculum_callback = CurriculumCallback(
-            shots_per_episode=50,
-            eval_window=3,
-            verbose=verbose,
-        )
-        eval_callback = EvalCallback(
-            eval_env,
-            callback_after_eval=curriculum_callback,
-            best_model_save_path=str(save_path / "best"),
-            log_path=str(log_path),
-            eval_freq=eval_freq // n_envs,
-            n_eval_episodes=n_eval_episodes,
-            deterministic=True,
-            render=False,
-            verbose=verbose,
-        )
-    else:
-        eval_callback = EvalCallback(
-            eval_env,
-            best_model_save_path=str(save_path / "best"),
-            log_path=str(log_path),
-            eval_freq=eval_freq // n_envs,
-            n_eval_episodes=n_eval_episodes,
-            deterministic=True,
-            render=False,
-            verbose=verbose,
-        )
+    eval_callback = EvalCallback(
+        eval_env,
+        best_model_save_path=str(save_path / "best"),
+        log_path=str(log_path),
+        eval_freq=eval_freq // n_envs,
+        n_eval_episodes=n_eval_episodes,
+        deterministic=True,
+        render=False,
+        verbose=verbose,
+    )
 
     checkpoint_callback = CheckpointCallback(
         save_freq=checkpoint_freq // n_envs,
@@ -375,13 +342,25 @@ def main():
     parser.add_argument(
         "--move-and-shoot",
         action="store_true",
-        help="Enable move-and-shoot training with curriculum learning (continuous env only)",
+        help="Enable move-and-shoot training (continuous env only)",
     )
     parser.add_argument(
         "--shot-interval",
         type=float,
         default=0.5,
         help="Seconds between shots in move-and-shoot mode (default: 0.5)",
+    )
+    parser.add_argument(
+        "--speed-min",
+        type=float,
+        default=0.0,
+        help="Min robot speed in m/s (default: 0.0)",
+    )
+    parser.add_argument(
+        "--speed-max",
+        type=float,
+        default=0.0,
+        help="Max robot speed in m/s (default: 0.0)",
     )
     parser.add_argument(
         "--resume",
@@ -409,6 +388,8 @@ def main():
         air_resistance=args.air_resistance,
         move_and_shoot=args.move_and_shoot,
         shot_interval=args.shot_interval,
+        speed_min=args.speed_min,
+        speed_max=args.speed_max,
         resume=args.resume,
     )
 

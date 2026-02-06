@@ -64,11 +64,11 @@ python scripts/train.py --algorithm SAC --env-type continuous --timesteps 50000
 # With air resistance for realistic physics
 python scripts/train.py --algorithm SAC --env-type continuous --timesteps 50000 --air-resistance
 
-# Move-and-shoot with curriculum learning (trains robot to shoot while moving)
-python scripts/train.py --algorithm SAC --env-type continuous --move-and-shoot --timesteps 150000
+# Move-and-shoot (trains robot to shoot while moving)
+python scripts/train.py --algorithm SAC --env-type continuous --move-and-shoot --speed-min 0.1 --speed-max 0.5 --timesteps 150000
 
 # Move-and-shoot with air resistance
-python scripts/train.py --algorithm SAC --env-type continuous --move-and-shoot --air-resistance --timesteps 150000
+python scripts/train.py --algorithm SAC --env-type continuous --move-and-shoot --air-resistance --speed-min 0.1 --speed-max 0.5 --timesteps 150000
 
 # Resume from a checkpoint
 python scripts/train.py --algorithm SAC --env-type continuous --resume models/SAC_CONT_*/checkpoints/shooter_50000_steps.zip
@@ -80,7 +80,9 @@ python scripts/train.py --algorithm SAC --env-type continuous --resume models/SA
 #   --eval-freq: Evaluation frequency (default: 1000)
 #   --n-envs: Parallel environments (default: 4)
 #   --air-resistance: Enable air resistance in physics simulation
-#   --move-and-shoot: Enable move-and-shoot with curriculum learning (continuous only)
+#   --move-and-shoot: Enable move-and-shoot (continuous only)
+#   --speed-min: Min robot speed in m/s (default: 0.0)
+#   --speed-max: Max robot speed in m/s (default: 0.0)
 #   --shot-interval: Seconds between shots in move-and-shoot mode (default: 0.5)
 #   --learning-rate: Learning rate (default: 3e-4)
 #   --resume: Path to saved model checkpoint to resume training from
@@ -91,6 +93,25 @@ python scripts/train.py --algorithm SAC --env-type continuous --resume models/SA
 ```bash
 python scripts/evaluate.py models/SAC_CONT_*/best/best_model.zip --env-type continuous --episodes 100
 ```
+
+## Visualization
+
+Generate interactive 3D visualizations of trained models in the browser:
+
+```bash
+# Visualize stationary shooting
+python scripts/visualize.py models/SAC_CONT_*/best/best_model.zip --env-type continuous --episodes 5
+
+# Visualize move-and-shoot (match speed range to training)
+python scripts/visualize.py models/SAC_CONT_MAS_*/best/best_model.zip \
+    --env-type continuous --move-and-shoot --air-resistance \
+    --speed-min 0.1 --speed-max 0.5 --episodes 5
+
+# Open in browser automatically
+python scripts/visualize.py models/SAC_CONT_*/best/best_model.zip --open-browser
+```
+
+The visualization shows animated ball trajectories, robot position, and the HUB target with playback controls.
 
 ## Project Structure
 
@@ -103,14 +124,15 @@ rebuilt_rl/
 │   ├── env/
 │   │   ├── shooter_env.py     # Discrete action environments (2D, 3D)
 │   │   └── shooter_env_continuous.py  # Continuous action environment (supports move-and-shoot)
-│   ├── paths/                 # Path generation for move-and-shoot mode
+│   ├── paths/                 # Bouncing path generation for move-and-shoot mode
 │   ├── callbacks/
-│   │   └── curriculum.py      # Curriculum learning callback for progressive difficulty
 │   └── physics/
 │       └── projectile.py      # 2D/3D trajectory simulation with air resistance
 ├── scripts/
 │   ├── train.py               # Training script
-│   └── evaluate.py            # Evaluation script
+│   ├── evaluate.py            # Evaluation script
+│   ├── visualize.py           # 3D visualization generator
+│   └── visualize_template.html # Three.js visualization template
 ├── docs/                      # Documentation
 └── tests/                     # Unit tests
 ```
@@ -140,19 +162,6 @@ rebuilt_rl/
 - 50 shots per episode (simulates a match)
 - Robot moves to new random position after each shot
 
-### Curriculum Learning (Move-and-Shoot)
-
-When `--move-and-shoot` is enabled, the agent trains through progressive difficulty levels:
-
-| Level | Name | Speed | Hit Rate to Advance |
-|-------|------|-------|---------------------|
-| 0 | Crawl | 0.1 - 0.5 m/s | 70% |
-| 1 | Slow | 0.5 - 1.5 m/s | 60% |
-| 2 | Medium | 1.5 - 3.0 m/s | 50% |
-| 3 | Fast | 3.0 - 5.0 m/s | Terminal |
-
-The replay buffer is cleared on each level advance to prevent stale transitions from destabilizing the critic.
-
 ## Results
 
 ### Stationary Shooting
@@ -163,15 +172,6 @@ SAC with continuous actions achieves **98.4% hit rate** with air resistance enab
 |---------------|----------|
 | Without air resistance | 99.7% |
 | With air resistance (realistic) | 98.4% |
-
-### Move-and-Shoot
-
-With curriculum learning, the agent learns to shoot accurately while moving at up to 5 m/s:
-
-| Configuration | Peak Reward | Final Reward |
-|---------------|-------------|--------------|
-| No air resistance (150k steps) | +98.93 | +94.57 |
-| With air resistance (150k steps) | +99.44 | +97.22 |
 
 ### SAC Hyperparameters
 

@@ -10,7 +10,6 @@ from ..config import (
     BALL_RADIUS,
     DRAG_COEFFICIENT,
     GRAVITY,
-    HUB_ENTRY_MAX,
     HUB_ENTRY_MIN,
     HUB_OPENING_HALF_WIDTH,
     HUB_OPENING_HEIGHT,
@@ -87,13 +86,14 @@ def compute_trajectory(
     height_at_target = None
     vy_at_target = None
 
-    # Simulate until ball hits ground or goes way past target
-    max_x = target_distance * 2  # Don't simulate forever
+    # Simulate until ball hits ground (time-limited for safety)
+    max_sim_time = 10.0
+    sim_time = 0.0
     prev_x = x
     prev_y = y
     prev_vy = vy
 
-    while y >= 0 and x <= max_x:
+    while y >= 0 and sim_time < max_sim_time:
         if air_resistance:
             # Compute velocity magnitude
             v_mag = np.sqrt(vx**2 + vy**2)
@@ -138,6 +138,8 @@ def compute_trajectory(
             else:
                 height_at_target = prev_y
                 vy_at_target = prev_vy
+
+        sim_time += dt
 
         # Store for next iteration
         prev_x = x
@@ -191,6 +193,9 @@ def compute_trajectory(
 def check_hub_entry(height: float, vy: float) -> tuple[bool, float]:
     """Check if ball enters HUB (basketball-style, from above).
 
+    Ball must be descending and above the rim (HUB_ENTRY_MIN). Any height
+    above the rim is valid -- a descending ball will fall into the opening.
+
     Args:
         height: Ball center height at target distance
         vy: Vertical velocity at target (negative = descending)
@@ -200,20 +205,15 @@ def check_hub_entry(height: float, vy: float) -> tuple[bool, float]:
     """
     # Must be descending (negative vy)
     if vy >= 0:
-        # Ball is still going up - will overshoot
-        miss_distance = height - HUB_ENTRY_MAX if height > HUB_ENTRY_MAX else HUB_ENTRY_MAX - height
-        return False, abs(miss_distance) + 1.0  # Extra penalty for wrong direction
+        miss_distance = abs(height - HUB_ENTRY_MIN) + 1.0  # Extra penalty for wrong direction
+        return False, miss_distance
 
-    # Check if height is within valid entry range
-    if HUB_ENTRY_MIN <= height <= HUB_ENTRY_MAX:
+    # Ball must be above the rim
+    if height >= HUB_ENTRY_MIN:
         return True, 0.0
 
-    # Compute miss distance
-    if height < HUB_ENTRY_MIN:
-        miss_distance = HUB_ENTRY_MIN - height  # Too low
-    else:
-        miss_distance = height - HUB_ENTRY_MAX  # Too high
-
+    # Too low - ball hits the side of the hub
+    miss_distance = HUB_ENTRY_MIN - height
     return False, miss_distance
 
 
@@ -228,8 +228,9 @@ def compute_trajectory_3d(
 ) -> TrajectoryResult3D:
     """Compute 3D projectile trajectory with azimuth aiming.
 
-    The vertical trajectory uses standard 2D projectile motion.
-    The azimuth determines lateral offset at the target.
+    Hit detection: the 2D trajectory is scanned for the point where
+    height descends through HUB_OPENING_HEIGHT. The 3D landing position
+    is compared to the hub center to determine hit/miss.
 
     Args:
         velocity: Launch velocity in m/s
@@ -246,46 +247,62 @@ def compute_trajectory_3d(
     # Compute 2D trajectory (elevation plane)
     result_2d = compute_trajectory(velocity, elevation, target_distance, dt, air_resistance)
 
-    # Compute azimuth error and lateral offset
-    azimuth_error = azimuth - target_bearing
-    # Normalize to [-pi, pi]
-    while azimuth_error > np.pi:
-        azimuth_error -= 2 * np.pi
-    while azimuth_error < -np.pi:
-        azimuth_error += 2 * np.pi
+    # Hub center position in robot frame
+    hub_x_rel = target_distance * np.cos(target_bearing)
+    hub_y_rel = target_distance * np.sin(target_bearing)
 
-    # Lateral offset at target distance
-    lateral_offset = target_distance * np.sin(azimuth_error)
+    # Scan 2D trajectory for descending crossing of HUB_OPENING_HEIGHT
+    traj_range = result_2d.trajectory_x  # horizontal range
+    traj_height = result_2d.trajectory_y  # height
 
-    # Check vertical hit (same as 2D)
-    vertical_hit, vertical_miss = check_hub_entry(
-        result_2d.height_at_target, result_2d.velocity_y_at_target
-    )
+    crossing_range = None
+    for i in range(1, len(traj_height)):
+        if traj_height[i - 1] >= HUB_OPENING_HEIGHT and traj_height[i] < HUB_OPENING_HEIGHT:
+            dh = traj_height[i - 1] - traj_height[i]
+            frac = (traj_height[i - 1] - HUB_OPENING_HEIGHT) / dh if dh > 0 else 0.0
+            crossing_range = traj_range[i - 1] + frac * (traj_range[i] - traj_range[i - 1])
+            break
 
-    # Check lateral hit (within HUB radius, accounting for ball radius)
     effective_radius = HUB_OPENING_HALF_WIDTH - BALL_RADIUS
-    lateral_miss = max(0.0, abs(lateral_offset) - effective_radius)
-    lateral_hit = lateral_miss == 0.0
 
-    # Overall hit requires both vertical and lateral
-    hit = vertical_hit and lateral_hit
+    if crossing_range is not None:
+        # Ball's 3D position when it descends through hub height
+        ball_x = crossing_range * np.cos(azimuth)
+        ball_y = crossing_range * np.sin(azimuth)
 
-    # Compute total miss distance (Euclidean)
-    if hit:
-        total_miss_distance = 0.0
+        dx_hub = ball_x - hub_x_rel
+        dy_hub = ball_y - hub_y_rel
+        landing_dist = np.sqrt(dx_hub * dx_hub + dy_hub * dy_hub)
+
+        hit = bool(landing_dist <= effective_radius)
+        lateral_miss = max(0.0, float(landing_dist) - effective_radius)
+        total_miss_distance = 0.0 if hit else lateral_miss
+        center_distance = float(landing_dist)
+        vertical_miss = 0.0
+
+        # Signed lateral offset from bearing line
+        azimuth_error = azimuth - target_bearing
+        while azimuth_error > np.pi:
+            azimuth_error -= 2 * np.pi
+        while azimuth_error < -np.pi:
+            azimuth_error += 2 * np.pi
+        lateral_offset = crossing_range * np.sin(azimuth_error)
     else:
-        total_miss_distance = np.sqrt(vertical_miss**2 + lateral_miss**2)
-
-    # Compute center distance (2D distance from center of opening)
-    vertical_center_dist = abs(result_2d.height_at_target - HUB_OPENING_HEIGHT)
-    center_distance = np.sqrt(vertical_center_dist**2 + lateral_offset**2)
+        # Ball never descended through hub height
+        hit = False
+        max_height = np.max(traj_height)
+        vertical_miss = max(0.0, HUB_ENTRY_MIN - max_height)
+        lateral_miss = 0.0
+        total_miss_distance = vertical_miss + 1.0
+        center_distance = total_miss_distance
+        lateral_offset = 0.0
 
     return TrajectoryResult3D(
         hit=hit,
         height_at_target=result_2d.height_at_target,
         velocity_y_at_target=result_2d.velocity_y_at_target,
         lateral_offset=lateral_offset,
-        vertical_miss=vertical_miss if not vertical_hit else 0.0,
+        vertical_miss=vertical_miss,
         lateral_miss=lateral_miss,
         total_miss_distance=total_miss_distance,
         center_distance=center_distance,
@@ -324,12 +341,12 @@ def compute_trajectory_3d_moving(
 ) -> TrajectoryResult3DMoving:
     """Compute 3D trajectory where the ball inherits robot horizontal velocity.
 
-    The ball's initial velocity is the vector sum of the launch velocity
-    (decomposed by elevation and azimuth) and the robot's ground-plane velocity.
+    Hit detection: the trajectory is integrated until the ball descends
+    through the hub opening plane (z = HUB_OPENING_HEIGHT). If the (x, y)
+    position at that crossing falls within the hub circle, the shot is a hit.
 
     Coordinate frame (robot at origin):
-      - Bearing axis points from robot toward HUB
-      - Cross-bearing axis is perpendicular (right-hand rule)
+      - X/Y are field-plane coordinates
       - Z is height (vertical, up positive)
 
     Args:
@@ -370,10 +387,24 @@ def compute_trajectory_3d_moving(
     cos_b = np.cos(target_bearing)
     sin_b = np.sin(target_bearing)
 
-    # Track when ball crosses the target plane (perpendicular to bearing at target_distance)
+    # Hub center position in robot frame
+    hub_x_rel = target_distance * cos_b
+    hub_y_rel = target_distance * sin_b
+
+    # Track when ball crosses the target plane (for height_at_target info)
     height_at_target = None
     vz_at_target = None
     lateral_at_target = None
+
+    # Hit detection: the hub is a cylinder with top surface at HUB_OPENING_HEIGHT.
+    # - Ball scores by descending through the top surface while inside the radius.
+    # - Ball hitting the cylindrical walls (entering radius at z < hub height) is a miss.
+    # Wall collision = ball ENTERS the radius while z < HUB_OPENING_HEIGHT.
+    # A ball that enters from above (z >= hub height) and descends through is valid.
+    wall_collision = False
+    inside_radius = False  # Track if ball has ever been inside the cylinder radius
+    descending_cross_x = None
+    descending_cross_y = None
 
     prev_d_along = 0.0
     prev_x, prev_y, prev_z, prev_vz = x, y, z, vz
@@ -418,6 +449,34 @@ def compute_trajectory_3d_moving(
             cross_y = prev_y + frac * (y - prev_y)
             lateral_at_target = -cross_x * sin_b + cross_y * cos_b
 
+        # Wall collision check: ball ENTERS the hub cylinder radius at z < hub opening height.
+        # A ball entering from above (z >= hub height) is allowed to descend through the opening.
+        dx_hub = x - hub_x_rel
+        dy_hub = y - hub_y_rel
+        dist_from_hub = np.sqrt(dx_hub * dx_hub + dy_hub * dy_hub)
+        currently_inside = dist_from_hub <= HUB_OPENING_HALF_WIDTH
+
+        if not inside_radius and currently_inside:
+            # Ball just entered the cylinder radius - check at what height
+            if z < HUB_OPENING_HEIGHT:
+                # Entered from the side (below top surface) - wall collision
+                wall_collision = True
+            inside_radius = True
+        elif inside_radius and not currently_inside:
+            # Ball exited the radius - reset for potential re-entry
+            inside_radius = False
+
+        # Detect descending crossing of hub opening plane (z = HUB_OPENING_HEIGHT).
+        # This is where valid entries (scoring) can occur.
+        if descending_cross_x is None and prev_z >= HUB_OPENING_HEIGHT > z:
+            dz = prev_z - z
+            if dz > 0:
+                frac_h = (prev_z - HUB_OPENING_HEIGHT) / dz
+            else:
+                frac_h = 0.0
+            descending_cross_x = prev_x + frac_h * (x - prev_x)
+            descending_cross_y = prev_y + frac_h * (y - prev_y)
+
         prev_d_along = d_along
         prev_x, prev_y, prev_z, prev_vz = x, y, z, vz
 
@@ -425,35 +484,58 @@ def compute_trajectory_3d_moving(
         ys.append(y)
         zs.append(z)
 
-    # Ball never reached target plane
+    # Fill in height_at_target if ball never reached target plane
     if height_at_target is None:
         height_at_target = 0.0
         vz_at_target = -abs(vz) if vz != 0 else -1.0
         lateral_at_target = 0.0
 
-    # Evaluate hit/miss using same criteria as existing code
-    vertical_hit, vertical_miss = check_hub_entry(height_at_target, vz_at_target)
-
+    # Hit detection: ball must descend through top surface without hitting walls first.
     effective_radius = HUB_OPENING_HALF_WIDTH - BALL_RADIUS
-    lateral_miss_dist = max(0.0, abs(lateral_at_target) - effective_radius)
-    lateral_hit = lateral_miss_dist == 0.0
 
-    hit = vertical_hit and lateral_hit
+    if wall_collision:
+        # Ball hit the cylindrical wall of the hub — miss
+        hit = False
+        lateral_miss_dist = 0.0
+        total_miss_distance = 1.0
+        center_distance = 0.0
+        vertical_miss = 0.0
+        lateral_offset = lateral_at_target if lateral_at_target is not None else 0.0
+    elif descending_cross_x is not None:
+        dx_hub = descending_cross_x - hub_x_rel
+        dy_hub = descending_cross_y - hub_y_rel
+        landing_dist = np.sqrt(dx_hub * dx_hub + dy_hub * dy_hub)
 
-    if hit:
-        total_miss_distance = 0.0
+        if landing_dist <= effective_radius:
+            # Valid descending entry within radius — hit
+            hit = True
+            lateral_miss_dist = 0.0
+            total_miss_distance = 0.0
+        else:
+            # Descending but outside radius — miss
+            hit = False
+            lateral_miss_dist = float(landing_dist) - effective_radius
+            total_miss_distance = lateral_miss_dist
+
+        center_distance = float(landing_dist)
+        vertical_miss = 0.0
+        lateral_offset = -descending_cross_x * sin_b + descending_cross_y * cos_b
     else:
-        total_miss_distance = np.sqrt(vertical_miss**2 + lateral_miss_dist**2)
-
-    vertical_center_dist = abs(height_at_target - HUB_OPENING_HEIGHT)
-    center_distance = np.sqrt(vertical_center_dist**2 + lateral_at_target**2)
+        # Ball never descended through hub height — miss
+        hit = False
+        max_height = max(zs) if zs else 0.0
+        vertical_miss = max(0.0, HUB_ENTRY_MIN - max_height)
+        lateral_miss_dist = 0.0
+        total_miss_distance = vertical_miss + 1.0
+        center_distance = total_miss_distance
+        lateral_offset = lateral_at_target if lateral_at_target is not None else 0.0
 
     return TrajectoryResult3DMoving(
         hit=hit,
         height_at_target=height_at_target,
         velocity_z_at_target=vz_at_target,
-        lateral_offset=lateral_at_target,
-        vertical_miss=vertical_miss if not vertical_hit else 0.0,
+        lateral_offset=lateral_offset,
+        vertical_miss=vertical_miss,
         lateral_miss=lateral_miss_dist,
         total_miss_distance=total_miss_distance,
         center_distance=center_distance,

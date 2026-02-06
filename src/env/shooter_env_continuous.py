@@ -11,9 +11,11 @@ from ..config import (
     ANGLE_MIN_DEG,
     AZIMUTH_MAX_DEG,
     AZIMUTH_MIN_DEG,
+    BALL_DIAMETER,
     DEFAULT_SHOT_INTERVAL,
     HUB_DISTANCE_FROM_WALL,
     HUB_OPENING_HALF_WIDTH,
+    HUB_OPENING_HEIGHT,
     MIN_DISTANCE_FROM_HUB,
     REWARD_HIT_BASE,
     REWARD_HIT_CENTER,
@@ -183,15 +185,6 @@ class ShooterEnvContinuous(gym.Env):
                 dtype=np.float32,
             )
 
-    def set_curriculum_level(self, speed_min: float, speed_max: float):
-        """Update speed range for curriculum learning.
-
-        Called by CurriculumCallback via env_method(). Changes take effect
-        on the next reset().
-        """
-        self.speed_min = speed_min
-        self.speed_max = speed_max
-
     def reset(self, seed=None, options=None):
         """Reset environment for new episode."""
         super().reset(seed=seed)
@@ -208,6 +201,7 @@ class ShooterEnvContinuous(gym.Env):
                 self.np_random,
                 speed_min=self.speed_min,
                 speed_max=self.speed_max,
+                path_duration=self.shots_per_episode * self.shot_interval,
             )
             self.path_time = 0.0
             self._update_position_from_path()
@@ -324,6 +318,15 @@ class ShooterEnvContinuous(gym.Env):
             max_miss = 5.0
             normalized_miss = min(result.total_miss_distance / max_miss, 1.0)
             reward = REWARD_MISS_SCALE * normalized_miss
+
+        # Penalize peak height above hub opening + 2 ball diameters buffer.
+        # Continuous gradient: flatter is always better, but close-range lobs
+        # are fine since their excess is small. -0.1 per meter of excess.
+        traj_z = getattr(result, "trajectory_z", result.trajectory_y)
+        peak_height = float(np.max(traj_z))
+        height_baseline = HUB_OPENING_HEIGHT + 2 * BALL_DIAMETER
+        excess_height = max(0.0, peak_height - height_baseline)
+        reward -= 0.1 * excess_height
 
         return reward
 
