@@ -58,17 +58,9 @@ pip install -e .
 ## Training
 
 ```bash
-# Train SAC with continuous actions (recommended)
-python scripts/train.py --algorithm SAC --env-type continuous --timesteps 50000
 
-# With air resistance for realistic physics
-python scripts/train.py --algorithm SAC --env-type continuous --timesteps 50000 --air-resistance
-
-# Move-and-shoot (trains robot to shoot while moving)
-python scripts/train.py --algorithm SAC --env-type continuous --move-and-shoot --speed-min 0.1 --speed-max 0.5 --timesteps 150000
-
-# Move-and-shoot with air resistance
-python scripts/train.py --algorithm SAC --env-type continuous --move-and-shoot --air-resistance --speed-min 0.1 --speed-max 0.5 --timesteps 150000
+# Move-and-shoot (trains robot to shoot while moving) with air resistance
+python scripts/train.py --algorithm SAC --env-type continuous --move-and-shoot --speed-min 0.1 --speed-max 0.5 --timesteps 150000 --air-resistance
 
 # Resume from a checkpoint
 python scripts/train.py --algorithm SAC --env-type continuous --resume models/SAC_CONT_*/checkpoints/shooter_50000_steps.zip
@@ -99,19 +91,17 @@ python scripts/evaluate.py models/SAC_CONT_*/best/best_model.zip --env-type cont
 Generate interactive 3D visualizations of trained models in the browser:
 
 ```bash
-# Visualize stationary shooting
-python scripts/visualize.py models/SAC_CONT_*/best/best_model.zip --env-type continuous --episodes 5
 
 # Visualize move-and-shoot (match speed range to training)
 python scripts/visualize.py models/SAC_CONT_MAS_*/best/best_model.zip \
     --env-type continuous --move-and-shoot --air-resistance \
     --speed-min 0.1 --speed-max 0.5 --episodes 5
 
-# Open in browser automatically
-python scripts/visualize.py models/SAC_CONT_*/best/best_model.zip --open-browser
 ```
 
-The visualization shows animated ball trajectories, robot position, and the HUB target with playback controls.
+The visualization shows animated ball trajectories, robot position, and the HUB target with playback controls.   Open the visualization.html file in your browser.
+
+![Rebuilt Move And Shoot Visualization](res/rebuilt_rl.png)
 
 ## Project Structure
 
