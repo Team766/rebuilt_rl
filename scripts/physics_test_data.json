@@ -1,0 +1,885 @@
+{
+  "test_cases": [
+    {
+      "name": "hub_entry_hit_above_rim",
+      "function": "checkHubEntry",
+      "params": {
+        "height": 2.005,
+        "vy": -5.0
+      },
+      "expected": {
+        "hit": true,
+        "miss_distance": 0.0
+      }
+    },
+    {
+      "name": "hub_entry_hit_edge",
+      "function": "checkHubEntry",
+      "params": {
+        "height": 1.915,
+        "vy": -3.0
+      },
+      "expected": {
+        "hit": true,
+        "miss_distance": 0.0
+      }
+    },
+    {
+      "name": "hub_entry_miss_too_low",
+      "function": "checkHubEntry",
+      "params": {
+        "height": 1.405,
+        "vy": -3.0
+      },
+      "expected": {
+        "hit": false,
+        "miss_distance": 0.5
+      },
+      "tolerance": {
+        "miss_distance": 0.01
+      }
+    },
+    {
+      "name": "hub_entry_miss_ascending",
+      "function": "checkHubEntry",
+      "params": {
+        "height": 1.83,
+        "vy": 2.0
+      },
+      "expected": {
+        "hit": false
+      }
+    },
+    {
+      "name": "optimal_angle_v15_d5",
+      "function": "computeOptimalAngle",
+      "params": {
+        "velocity": 15.0,
+        "target_distance": 5.0
+      },
+      "expected": {
+        "angle_deg": 83.50418148267264,
+        "reachable": true,
+        "hit_with_optimal": false,
+        "height_at_target": 1.829999999998102
+      },
+      "tolerance": {
+        "angle_deg": 0.5,
+        "height_at_target": 0.05
+      }
+    },
+    {
+      "name": "optimal_angle_v12_d4",
+      "function": "computeOptimalAngle",
+      "params": {
+        "velocity": 12.0,
+        "target_distance": 4.0
+      },
+      "expected": {
+        "angle_deg": 81.67778206628242,
+        "reachable": true,
+        "hit_with_optimal": false,
+        "height_at_target": 1.8299999999991916
+      },
+      "tolerance": {
+        "angle_deg": 0.5,
+        "height_at_target": 0.05
+      }
+    },
+    {
+      "name": "optimal_angle_v10_d3",
+      "function": "computeOptimalAngle",
+      "params": {
+        "velocity": 10.0,
+        "target_distance": 3.0
+      },
+      "expected": {
+        "angle_deg": 80.75336279386622,
+        "reachable": true,
+        "hit_with_optimal": false,
+        "height_at_target": 1.830000000000355
+      },
+      "tolerance": {
+        "angle_deg": 0.5,
+        "height_at_target": 0.05
+      }
+    },
+    {
+      "name": "optimal_angle_v20_d8",
+      "function": "computeOptimalAngle",
+      "params": {
+        "velocity": 20.0,
+        "target_distance": 8.0
+      },
+      "expected": {
+        "angle_deg": 84.24486852774099,
+        "reachable": true,
+        "hit_with_optimal": false,
+        "height_at_target": 1.829999999994176
+      },
+      "tolerance": {
+        "angle_deg": 0.5,
+        "height_at_target": 0.05
+      }
+    },
+    {
+      "name": "optimal_angle_impossible",
+      "function": "computeOptimalAngle",
+      "params": {
+        "velocity": 3.0,
+        "target_distance": 50.0
+      },
+      "expected": {
+        "reachable": false
+      }
+    },
+    {
+      "name": "stationary_hit_bearing30",
+      "params": {
+        "launch_velocity": 8.3,
+        "elevation_deg": 70,
+        "azimuth_deg": 30,
+        "target_distance": 4.0,
+        "target_bearing_deg": 30,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": true,
+        "height_at_target": 1.744332636977281,
+        "velocity_z_at_target": -6.023453014030891,
+        "lateral_offset": -1.7763568394002505e-15,
+        "vertical_miss": 0.0,
+        "lateral_miss": 0.0,
+        "total_miss_distance": 0.0,
+        "center_distance": 0.04081888138002416,
+        "trajectory_length": 1652,
+        "start_z": 0.5,
+        "max_z": 3.5965796582558536
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "stationary_hit_bearing45",
+      "params": {
+        "launch_velocity": 8.3,
+        "elevation_deg": 70,
+        "azimuth_deg": 45,
+        "target_distance": 4.0,
+        "target_bearing_deg": 45,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": true,
+        "height_at_target": 1.7443326369770527,
+        "velocity_z_at_target": -6.023453014031262,
+        "lateral_offset": 2.220446049250313e-16,
+        "vertical_miss": 0.0,
+        "lateral_miss": 0.0,
+        "total_miss_distance": 0.0,
+        "center_distance": 0.04081888138012967,
+        "trajectory_length": 1652,
+        "start_z": 0.5,
+        "max_z": 3.5965796582558536
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "stationary_miss_wrong_azimuth",
+      "params": {
+        "launch_velocity": 15.0,
+        "elevation_deg": 50,
+        "azimuth_deg": 45,
+        "target_distance": 4.0,
+        "target_bearing_deg": 0,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 5.550312606565849,
+        "velocity_z_at_target": 5.735137723362919,
+        "lateral_offset": 15.131912513015697,
+        "vertical_miss": 0.0,
+        "lateral_miss": 18.330479831481455,
+        "total_miss_distance": 18.330479831481455,
+        "center_distance": 18.785479831481453,
+        "trajectory_length": 2386,
+        "start_z": 0.5,
+        "max_z": 7.223889783384929
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "stationary_miss_weak_shot",
+      "params": {
+        "launch_velocity": 5.0,
+        "elevation_deg": 15,
+        "azimuth_deg": 0,
+        "target_distance": 5.0,
+        "target_bearing_deg": 0,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 0.0,
+        "velocity_z_at_target": -3.3852747744873892,
+        "lateral_offset": 0.0,
+        "vertical_miss": 1.320290785457849,
+        "lateral_miss": 0.0,
+        "total_miss_distance": 2.320290785457849,
+        "center_distance": 2.320290785457849,
+        "trajectory_length": 478,
+        "start_z": 0.5,
+        "max_z": 0.5847092145421511
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "wall_collision_very_close",
+      "params": {
+        "launch_velocity": 5.66,
+        "elevation_deg": 78.88,
+        "azimuth_deg": 0,
+        "target_distance": 0.5,
+        "target_bearing_deg": 0,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 2.012511775586743,
+        "velocity_z_at_target": 1.0603851741748818,
+        "lateral_offset": 0.0,
+        "vertical_miss": 0.0,
+        "lateral_miss": 0.0,
+        "total_miss_distance": 1.0,
+        "center_distance": 0.0,
+        "trajectory_length": 1217,
+        "start_z": 0.5,
+        "max_z": 2.0692920367996837
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "wall_collision_close",
+      "params": {
+        "launch_velocity": 5.66,
+        "elevation_deg": 78.88,
+        "azimuth_deg": 0,
+        "target_distance": 0.7,
+        "target_bearing_deg": 0,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 2.041240998727592,
+        "velocity_z_at_target": -0.7369550648475248,
+        "lateral_offset": 0.0,
+        "vertical_miss": 0.0,
+        "lateral_miss": 0.0,
+        "total_miss_distance": 1.0,
+        "center_distance": 0.0,
+        "trajectory_length": 1217,
+        "start_z": 0.5,
+        "max_z": 2.0692920367996837
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "entry_from_above_hit",
+      "params": {
+        "launch_velocity": 5.66,
+        "elevation_deg": 78.88,
+        "azimuth_deg": 0,
+        "target_distance": 0.92,
+        "target_bearing_deg": 0,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": true,
+        "height_at_target": 1.6925027044704315,
+        "velocity_z_at_target": -2.714029327772175,
+        "lateral_offset": 0.0,
+        "vertical_miss": 0.0,
+        "lateral_miss": 0.0,
+        "total_miss_distance": 0.0,
+        "center_distance": 0.06144221143106976,
+        "trajectory_length": 1217,
+        "start_z": 0.5,
+        "max_z": 2.0692920367996837
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "moving_lateral_drift",
+      "params": {
+        "launch_velocity": 15.0,
+        "elevation_deg": 45,
+        "azimuth_deg": 0,
+        "target_distance": 5.0,
+        "target_bearing_deg": 0,
+        "robot_vx": 0,
+        "robot_vy": 2.0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 4.40768657929086,
+        "velocity_z_at_target": 5.982123368838287,
+        "lateral_offset": 4.055361638389341,
+        "vertical_miss": 0.0,
+        "lateral_miss": 16.54266156497984,
+        "total_miss_distance": 16.54266156497984,
+        "center_distance": 16.99766156497984,
+        "trajectory_length": 2209,
+        "start_z": 0.5,
+        "max_z": 6.228642446939935
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "moving_forward",
+      "params": {
+        "launch_velocity": 15.0,
+        "elevation_deg": 45,
+        "azimuth_deg": 0,
+        "target_distance": 5.0,
+        "target_bearing_deg": 0,
+        "robot_vx": 3.0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 3.733452294358286,
+        "velocity_z_at_target": 7.001733947189539,
+        "lateral_offset": 0.0,
+        "vertical_miss": 0.0,
+        "lateral_miss": 22.134845317601155,
+        "total_miss_distance": 22.134845317601155,
+        "center_distance": 22.589845317601153,
+        "trajectory_length": 2209,
+        "start_z": 0.5,
+        "max_z": 6.228642446939935
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "moving_backward",
+      "params": {
+        "launch_velocity": 15.0,
+        "elevation_deg": 45,
+        "azimuth_deg": 0,
+        "target_distance": 5.0,
+        "target_bearing_deg": 0,
+        "robot_vx": -2.0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 5.003600734968511,
+        "velocity_z_at_target": 4.907488222332851,
+        "lateral_offset": 0.0,
+        "vertical_miss": 0.0,
+        "lateral_miss": 11.996441221627896,
+        "total_miss_distance": 11.996441221627896,
+        "center_distance": 12.451441221627896,
+        "trajectory_length": 2209,
+        "start_z": 0.5,
+        "max_z": 6.228642446939935
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "air_resistance_on",
+      "params": {
+        "launch_velocity": 15.0,
+        "elevation_deg": 45,
+        "azimuth_deg": 0,
+        "target_distance": 8.0,
+        "target_bearing_deg": 0,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": true
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 5.190409236863302,
+        "velocity_z_at_target": 0.9162115904028951,
+        "lateral_offset": 0.0,
+        "vertical_miss": 0.0,
+        "lateral_miss": 6.875171512516088,
+        "total_miss_distance": 6.875171512516088,
+        "center_distance": 7.330171512516088,
+        "trajectory_length": 2017,
+        "start_z": 0.5,
+        "max_z": 5.23220705576416
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "air_resistance_off",
+      "params": {
+        "launch_velocity": 15.0,
+        "elevation_deg": 45,
+        "azimuth_deg": 0,
+        "target_distance": 8.0,
+        "target_bearing_deg": 0,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 5.705899504456302,
+        "velocity_z_at_target": 3.207436359462351,
+        "lateral_offset": 0.0,
+        "vertical_miss": 0.0,
+        "lateral_miss": 13.051802860017231,
+        "total_miss_distance": 13.051802860017231,
+        "center_distance": 13.506802860017231,
+        "trajectory_length": 2209,
+        "start_z": 0.5,
+        "max_z": 6.228642446939935
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "air_resistance_moving",
+      "params": {
+        "launch_velocity": 15.0,
+        "elevation_deg": 45,
+        "azimuth_deg": 0,
+        "target_distance": 5.0,
+        "target_bearing_deg": 0,
+        "robot_vx": 2.0,
+        "robot_vy": 1.0,
+        "air_resistance": true
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 3.8501246299101113,
+        "velocity_z_at_target": 5.270695164589811,
+        "lateral_offset": 1.3929835646040205,
+        "vertical_miss": 0.0,
+        "lateral_miss": 12.18279345746819,
+        "total_miss_distance": 12.18279345746819,
+        "center_distance": 12.63779345746819,
+        "trajectory_length": 1998,
+        "start_z": 0.5,
+        "max_z": 5.140468126176499
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "sanity_slow_v10_d5",
+      "params": {
+        "launch_velocity": 10.0,
+        "elevation_deg": 45,
+        "azimuth_deg": 0,
+        "target_distance": 5.0,
+        "target_bearing_deg": 0,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 3.044031173404486,
+        "velocity_z_at_target": 0.13435028842539395,
+        "lateral_offset": 0.0,
+        "vertical_miss": 0.0,
+        "lateral_miss": 3.1574171947557126,
+        "total_miss_distance": 3.1574171947557126,
+        "center_distance": 3.6124171947557127,
+        "trajectory_length": 1510,
+        "start_z": 0.5,
+        "max_z": 3.0448852245431692
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "sanity_fast_v20_d5",
+      "params": {
+        "launch_velocity": 20.0,
+        "elevation_deg": 45,
+        "azimuth_deg": 0,
+        "target_distance": 5.0,
+        "target_bearing_deg": 0,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 4.885139608351132,
+        "velocity_z_at_target": 10.673776862010966,
+        "lateral_offset": 0.0,
+        "vertical_miss": 0.0,
+        "lateral_miss": 33.92859812277774,
+        "total_miss_distance": 33.92859812277774,
+        "center_distance": 34.38359812277774,
+        "trajectory_length": 2919,
+        "start_z": 0.5,
+        "max_z": 10.686610023796423
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "sanity_low_angle_30",
+      "params": {
+        "launch_velocity": 15.0,
+        "elevation_deg": 30,
+        "azimuth_deg": 0,
+        "target_distance": 5.0,
+        "target_bearing_deg": 0,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 2.658196303155577,
+        "velocity_z_at_target": 3.724129239499895,
+        "lateral_offset": 0.0,
+        "vertical_miss": 0.0,
+        "lateral_miss": 11.732805355920584,
+        "total_miss_distance": 11.732805355920584,
+        "center_distance": 12.187805355920585,
+        "trajectory_length": 1594,
+        "start_z": 0.5,
+        "max_z": 3.3632237000000313
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "sanity_high_angle_60",
+      "params": {
+        "launch_velocity": 15.0,
+        "elevation_deg": 60,
+        "azimuth_deg": 0,
+        "target_distance": 5.0,
+        "target_bearing_deg": 0,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 6.976982947844413,
+        "velocity_z_at_target": 6.450381056766663,
+        "lateral_offset": 0.0,
+        "vertical_miss": 0.0,
+        "lateral_miss": 13.600033487678997,
+        "total_miss_distance": 13.600033487678997,
+        "center_distance": 14.055033487678998,
+        "trajectory_length": 2687,
+        "start_z": 0.5,
+        "max_z": 9.094423019159056
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "bearing_neg30_hit",
+      "params": {
+        "launch_velocity": 8.3,
+        "elevation_deg": 70,
+        "azimuth_deg": -30,
+        "target_distance": 4.0,
+        "target_bearing_deg": -30,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": true,
+        "height_at_target": 1.744332636977281,
+        "velocity_z_at_target": -6.023453014030891,
+        "lateral_offset": 1.7763568394002505e-15,
+        "vertical_miss": 0.0,
+        "lateral_miss": 0.0,
+        "total_miss_distance": 0.0,
+        "center_distance": 0.04081888138002416,
+        "trajectory_length": 1652,
+        "start_z": 0.5,
+        "max_z": 3.5965796582558536
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    },
+    {
+      "name": "zero_vel_equiv_v15_e45_d5",
+      "params": {
+        "launch_velocity": 15.0,
+        "elevation_deg": 45,
+        "azimuth_deg": 10,
+        "target_distance": 5.0,
+        "target_bearing_deg": 10,
+        "robot_vx": 0,
+        "robot_vy": 0,
+        "air_resistance": false
+      },
+      "function": "computeTrajectory3DMoving",
+      "expected": {
+        "hit": false,
+        "height_at_target": 4.407686579290879,
+        "velocity_z_at_target": 5.982123368838255,
+        "lateral_offset": 2.1760371282653068e-14,
+        "vertical_miss": 0.0,
+        "lateral_miss": 16.05180286001722,
+        "total_miss_distance": 16.05180286001722,
+        "center_distance": 16.506802860017217,
+        "trajectory_length": 2209,
+        "start_z": 0.5,
+        "max_z": 6.228642446939935
+      },
+      "tolerance": {
+        "height_at_target": 0.05,
+        "velocity_z_at_target": 0.1,
+        "lateral_offset": 0.05,
+        "vertical_miss": 0.05,
+        "lateral_miss": 0.05,
+        "total_miss_distance": 0.1,
+        "center_distance": 0.05,
+        "start_z": 0.01,
+        "max_z": 0.05
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "name": "air_resistance_reduces_height",
+      "type": "less_than",
+      "field": "height_at_target",
+      "case_a": "air_resistance_on",
+      "case_b": "air_resistance_off",
+      "description": "Air resistance should reduce height at target"
+    },
+    {
+      "name": "faster_shot_higher_at_target",
+      "type": "greater_than",
+      "field": "height_at_target",
+      "case_a": "sanity_fast_v20_d5",
+      "case_b": "sanity_slow_v10_d5",
+      "description": "Faster shot should have higher height at same distance"
+    },
+    {
+      "name": "higher_angle_higher_arc",
+      "type": "greater_than",
+      "field": "max_z",
+      "case_a": "sanity_high_angle_60",
+      "case_b": "sanity_low_angle_30",
+      "description": "Higher angle should produce higher arc"
+    }
+  ]
+}
