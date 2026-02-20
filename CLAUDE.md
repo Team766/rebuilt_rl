@@ -9,8 +9,12 @@ Reinforcement learning for FRC 2026 REBUILT ball shooting. Trains an agent to ou
 ## Common Commands
 
 ```bash
-# Install
+# Install (standard, CUDA 12.6)
 poetry install --with dev
+
+# Install on DGX Spark (CUDA 13.0) - override PyTorch after install
+# poetry install --with dev
+# poetry run pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cu130 --force-reinstall
 
 # Run all tests
 poetry run pytest tests/ -v --tb=short
@@ -41,8 +45,11 @@ python scripts/train.py --algorithm SAC --env-type continuous --move-and-shoot -
 # Train move-and-shoot with air resistance
 python scripts/train.py --algorithm SAC --env-type continuous --move-and-shoot --air-resistance --timesteps 150000
 
+# Resume training from checkpoint
+python scripts/train.py --algorithm SAC --env-type continuous --resume models/SAC_CONT_*/checkpoints/shooter_50000_steps.zip
+
 # Evaluate
-python scripts/evaluate.py models/SAC_CONT_*/best/best_model.zip --env-type continuous --episodes 100
+python scripts/evaluate.py models/SAC_CONT_*/best/best_model.zip --env-type continuous --episodes 100 --analyze-by-distance
 
 # Monitor training
 tensorboard --logdir logs/
@@ -92,3 +99,4 @@ All environments use minimal observations (distance + bearing, not absolute posi
 - CI replaces GPU PyTorch with CPU-only version since GitHub Actions has no GPU
 - Move-and-shoot (`--move-and-shoot`) requires `--env-type continuous`. Uses 4D observations [distance, bearing, vx, vy]. Robot velocity is added to ball launch velocity (realistic physics). The robot bounces elastically off zone walls (triangle-wave folding), staying in motion for the entire episode. Use `--speed-min` and `--speed-max` to set the robot speed range.
 - SAC hyperparameters: `batch_size=256`, `gradient_steps=1`, `target_entropy=-6.0`. Larger batch sizes and more gradient steps cause critic Q-value divergence, especially in move-and-shoot mode. The low target entropy allows the policy to stay deterministic after convergence (default of -3 drives entropy back up, degrading a converged policy). Gradient clipping (max norm 1.0) is applied via `LoggingSAC`.
+- Imports use `from src.xxx` (Poetry `packages = [{ include = "src" }]`), e.g. `from src.config import ...`, `from src.physics.projectile import compute_trajectory_3d`.
