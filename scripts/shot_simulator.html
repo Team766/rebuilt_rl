@@ -957,12 +957,38 @@
             document.getElementById('top-bar').style.display = 'none';
             document.getElementById('canvas-container').style.display = 'none';
 
-            fetch('physics_test_data.json')
-                .then(response => response.json())
+            loadPhysicsTestData()
                 .then(data => runTests(data))
                 .catch(err => {
-                    document.getElementById('test-results').innerHTML = `<p>Error loading test data: ${err}</p>`;
+                    document.getElementById('test-results').innerHTML = `<p>Error loading test data: ${err.message}</p>`;
                 });
+        }
+
+        async function loadPhysicsTestData() {
+            if (window.location.protocol === 'file:') {
+                throw new Error('Open via a local web server (file:// blocks fetch). Try: python -m http.server 8000 and use /scripts/shot_simulator.html?test=1');
+            }
+
+            const candidates = [
+                'physics_test_data.json',
+                './physics_test_data.json',
+                '/scripts/physics_test_data.json'
+            ];
+
+            let lastError = null;
+            for (const path of candidates) {
+                try {
+                    const response = await fetch(path, { cache: 'no-store' });
+                    if (!response.ok) {
+                        throw new Error(`${path} returned ${response.status}`);
+                    }
+                    return await response.json();
+                } catch (err) {
+                    lastError = err;
+                }
+            }
+
+            throw new Error(`Could not load physics test data. Last error: ${lastError?.message || lastError}`);
         }
 
             // Runs in-browser regression tests against deterministic expected values.
