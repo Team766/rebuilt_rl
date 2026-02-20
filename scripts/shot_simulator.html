@@ -153,6 +153,28 @@
             color: #ddd;
         }
 
+        .manual-controls.disabled {
+            opacity: 0.45;
+        }
+
+        .manual-controls input[type="range"]:disabled {
+            cursor: not-allowed;
+            filter: grayscale(1);
+        }
+
+        .debug-block {
+            font-family: 'Consolas', monospace;
+            font-size: 11px;
+            line-height: 1.35;
+            color: #cfe8ff;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 4px;
+            padding: 8px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
         .status-indicator {
             display: inline-flex;
             align-items: center;
@@ -177,7 +199,8 @@
         }
 
         .status-dot.neutral {
-            background: #666;
+            background: #2da44e;
+            box-shadow: 0 0 8px #2da44e;
         }
 
         .controls-help {
@@ -259,8 +282,8 @@
     </div>
 
     <div id="sidebar">
-        <div class="section">
-            <div class="section-title">Launch Parameters</div>
+        <div class="section manual-controls" id="manual-controls-section">
+            <div class="section-title">Manual Controls</div>
             <div class="control-group">
                 <label class="control-label">Velocity (m/s)</label>
                 <div class="slider-container">
@@ -281,6 +304,42 @@
                     <input type="range" id="azimuth-slider" min="-90" max="90" step="0.5" value="0.0">
                     <span class="value-display" id="azimuth-value">0.0</span>
                 </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Move-and-Shoot</div>
+            <div class="control-group">
+                <label class="control-label">Robot Vx (m/s)</label>
+                <div class="slider-container">
+                    <input type="range" id="robot-vx-slider" min="-1" max="1" step="0.1" value="0.1">
+                    <span class="value-display" id="robot-vx-value">0.1</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <label class="control-label">Robot Vy (m/s)</label>
+                <div class="slider-container">
+                    <input type="range" id="robot-vy-slider" min="-1" max="1" step="0.1" value="0.1">
+                    <span class="value-display" id="robot-vy-value">0.1</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <label>
+                    <input type="checkbox" id="velocity-motion-checkbox">
+                    Enable Velocity Motion
+                </label>
+            </div>
+            <div class="control-group">
+                <label>
+                    <input type="checkbox" id="wall-reflection-checkbox" checked>
+                    Wall Reflection
+                </label>
+            </div>
+            <div class="control-group">
+                <label>
+                    <input type="checkbox" id="autoshoot-checkbox">
+                    AutoShoot (ShooterUtils)
+                </label>
             </div>
         </div>
 
@@ -311,18 +370,26 @@
         <div class="section">
             <div class="section-title">Robot Info</div>
             <div class="info-line">Position: (<span id="robot-x">--</span>, <span id="robot-y">--</span>) m</div>
+            <div class="info-line">Velocity: (<span id="robot-vx">--</span>, <span id="robot-vy">--</span>) m/s</div>
             <div class="info-line">Distance: <span id="optimal-distance">--</span> m</div>
             <div class="info-line">Bearing: <span id="optimal-bearing">--</span> deg</div>
+            <div class="info-line">Shot Mode: <span id="shot-mode">Manual</span></div>
             <div class="info-line">Shots: <span id="shot-counter">0/0 (0%)</span></div>
             <div id="miss-reason-display" class="miss-reason"></div>
         </div>
 
         <div class="section">
+            <div class="section-title">AutoShoot Debug</div>
+            <div id="autoshoot-debug" class="debug-block">AutoShoot disabled.</div>
+        </div>
+
+        <div class="section">
             <div class="section-title">Controls</div>
-            <div class="info-line">WASD/Arrows: Move robot</div>
-            <div class="info-line">Space: Fire shot</div>
+            <div class="info-line">WASD/Arrows: Move robot (manual mode)</div>
+            <div class="info-line">Space: Fire shot (auto if enabled)</div>
             <div class="info-line">R: Reset position</div>
         </div>
+
     </div>
 
     <div id="test-panel">
@@ -344,6 +411,22 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+        // High-level architecture:
+        // 1) Command layer:
+        //    - Manual mode uses velocity/elevation/azimuth sliders.
+        //    - AutoShoot mode uses ShooterUtils-ported solve with velocity lead compensation.
+        // 2) Physics layer:
+        //    - computeTrajectory3DMoving() integrates 3D flight with optional drag and robot
+        //      velocity inheritance, then evaluates hub entry/wall collisions.
+        // 3) Presentation layer:
+        //    - updatePreview() redraws the predicted path and robot aiming pose.
+        //    - fireShot() animates a sampled trajectory and updates hit/miss stats.
+        // 4) Runtime loop:
+        //    - animate() advances robot motion (manual or velocity+bounce), refreshes preview,
+        //      and renders the scene.
+        // 5) Validation mode:
+        //    - ?test=1 runs physics regression tests from physics_test_data.json.
+
         // ==================== CONSTANTS ====================
         const GRAVITY = 9.81;
         const AIR_DENSITY = 1.225;
@@ -364,8 +447,18 @@
         const HUB_X = HUB_DISTANCE_FROM_WALL;
         const HUB_Y = ALLIANCE_ZONE_WIDTH / 2;
 
+        const SHOOTER_MIN_LAUNCH_SPEED = 10.0;
+        const SHOOTER_MAX_LAUNCH_SPEED = 25.0;
+        const SHOOTER_MIN_ANGLE = 60.0;
+        const SHOOTER_MAX_ANGLE = 80.0;
+        const MAX_DISTANCE_TO_HUB = 9.2;
+        const DELTA_Z = HUB_OPENING_HEIGHT - LAUNCH_HEIGHT;
+
+        let state = null;
+
         // ==================== PHYSICS ENGINE ====================
 
+        // Shared hit check used by 2D helper tests.
         function checkHubEntry(height, vy) {
             if (vy >= 0) {
                 const miss_distance = Math.abs(height - HUB_ENTRY_MIN) + 1.0;
@@ -380,6 +473,7 @@
             return { hit: false, miss_distance };
         }
 
+        // 2D trajectory integrator used for unit-test parity and angle solving.
         function computeTrajectory2D(velocity, angle, target_distance, dt = 0.001, air_resistance = false, drag_coeff = DRAG_COEFFICIENT_DEFAULT, ball_mass = BALL_MASS_DEFAULT) {
             let vx = velocity * Math.cos(angle);
             let vy = velocity * Math.sin(angle);
@@ -515,6 +609,8 @@
             return { angle_deg: null, reachable: false };
         }
 
+        // Main simulator physics path:
+        // 3D ballistic integration + moving-robot velocity inheritance + hub wall/top-entry checks.
         function computeTrajectory3DMoving(
             launch_velocity,
             elevation,
@@ -702,6 +798,156 @@
             };
         }
 
+        function clamp(value, minValue, maxValue) {
+            return Math.max(minValue, Math.min(maxValue, value));
+        }
+
+        // ==================== AUTOSHOOT (PORTED FROM ShooterUtils.java) ====================
+        // These helpers mirror the Java autoshoot routine but keep JS-safe math and guardrails.
+
+        // Port of ShooterUtils.getLaunchSpeed(totalHubDist)
+        function getLaunchSpeedShooterUtils(totalHubDist) {
+            const ratio = clamp(totalHubDist / MAX_DISTANCE_TO_HUB, 0.0, 1.0);
+            return SHOOTER_MIN_LAUNCH_SPEED
+                + (SHOOTER_MAX_LAUNCH_SPEED - SHOOTER_MIN_LAUNCH_SPEED) * ratio;
+        }
+
+        // Port of ShooterUtils.getInitialHoodAngle(totalHubDist, shooterLaunchSpeed)
+        // Solves the ballistic quadratic for tan(theta) and selects a valid upward arc.
+        function getInitialHoodAngleShooterUtils(totalHubDist, shooterLaunchSpeed) {
+            if (totalHubDist <= 0.0 || shooterLaunchSpeed <= 0.0) {
+                return null;
+            }
+
+            const speedSq = shooterLaunchSpeed * shooterLaunchSpeed;
+            const distSq = totalHubDist * totalHubDist;
+            const quadA = -4.9 * distSq / speedSq;
+            const quadB = totalHubDist;
+            const quadC = -4.9 * distSq / speedSq - DELTA_Z;
+
+            const discriminant = quadB * quadB - 4 * quadA * quadC;
+            if (Math.abs(quadA) < 1e-9 || discriminant < 0) {
+                return null;
+            }
+
+            const sqrtDisc = Math.sqrt(discriminant);
+            const root1 = (-quadB + sqrtDisc) / (2 * quadA);
+            const root2 = (-quadB - sqrtDisc) / (2 * quadA);
+
+            const angle1 = Math.atan(root1);
+            const angle2 = Math.atan(root2);
+
+            const validAngles = [angle1, angle2].filter(a => Number.isFinite(a) && a > 0.0 && a < Math.PI / 2);
+            if (validAngles.length === 0) {
+                return null;
+            }
+
+            return Math.max(...validAngles);
+        }
+
+        // Port of ShooterUtils.getFlightTime(totalHubDist, shooterLaunchSpeed, hoodAngle)
+        function getFlightTimeShooterUtils(totalHubDist, shooterLaunchSpeed, hoodAngleRad) {
+            const cosTerm = Math.cos(hoodAngleRad);
+            if (shooterLaunchSpeed <= 0.0 || cosTerm <= 1e-9) {
+                return 0.0;
+            }
+            return totalHubDist / (shooterLaunchSpeed * cosTerm);
+        }
+
+        // Port of ShooterUtils.getFinalHoodAngle(targetDist, shooterLaunchSpeed, flightTime)
+        // Computes final hood angle from lead-adjusted target distance and clamps to allowed range.
+        function getFinalHoodAngleShooterUtils(targetDist, shooterLaunchSpeed, flightTime) {
+            const denom = shooterLaunchSpeed * flightTime;
+            if (denom <= 1e-9) {
+                return SHOOTER_MIN_ANGLE;
+            }
+            const cosArg = clamp(targetDist / denom, -1.0, 1.0);
+            const rawAngleDeg = Math.acos(cosArg) * 180 / Math.PI;
+            return clamp(rawAngleDeg, SHOOTER_MIN_ANGLE, SHOOTER_MAX_ANGLE);
+        }
+
+        // Simulator-specific: only inherit chassis velocity into shot when velocity motion is enabled.
+        function getEffectiveRobotVelocity() {
+            if (!state.velocityMotionEnabled) {
+                return { vx: 0.0, vy: 0.0 };
+            }
+            return { vx: state.robotVx, vy: state.robotVy };
+        }
+
+        // Port of ShooterUtils.run() solve path:
+        // 1) compute raw hub vector, 2) estimate flight time, 3) lead target by robot velocity,
+        // 4) solve turret + hood command, 5) return debug-friendly intermediate values.
+        function computeAutoShootCommand(robotVx, robotVy) {
+            const xHubDistance = HUB_X - state.robotX;
+            const yHubDistance = HUB_Y - state.robotY;
+            const totalHubDist = Math.hypot(xHubDistance, yHubDistance);
+
+            const shooterLaunchSpeed = getLaunchSpeedShooterUtils(totalHubDist);
+            const initialHoodAngle = getInitialHoodAngleShooterUtils(totalHubDist, shooterLaunchSpeed)
+                ?? (65.0 * Math.PI / 180);
+            const flightTime = getFlightTimeShooterUtils(totalHubDist, shooterLaunchSpeed, initialHoodAngle);
+
+            const targetXLocation = xHubDistance - robotVx * flightTime;
+            const targetYLocation = yHubDistance - robotVy * flightTime;
+            const targetDist = Math.hypot(targetXLocation, targetYLocation);
+
+            const turretAngleDeg = Math.atan2(targetYLocation, targetXLocation) * 180 / Math.PI;
+            const finalHoodAngleDeg = getFinalHoodAngleShooterUtils(targetDist, shooterLaunchSpeed, flightTime);
+
+            return {
+                velocity: shooterLaunchSpeed,
+                elevationDeg: finalHoodAngleDeg,
+                initialHoodAngleDeg: initialHoodAngle * 180 / Math.PI,
+                turretAngleDeg,
+                absoluteAzimuth: turretAngleDeg * Math.PI / 180,
+                flightTime,
+                xHubDistance,
+                yHubDistance,
+                totalHubDist,
+                targetXLocation,
+                targetYLocation,
+                targetDist,
+                robotVx,
+                robotVy
+            };
+        }
+
+        // Unified shot command for preview/fire:
+        // - AutoShoot ON: uses ShooterUtils-derived solve.
+        // - AutoShoot OFF: uses manual slider values.
+        function getShotCommand() {
+            const dx = HUB_X - state.robotX;
+            const dy = HUB_Y - state.robotY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const bearing = Math.atan2(dy, dx);
+            const velocity = getEffectiveRobotVelocity();
+
+            if (state.autoShootEnabled) {
+                const auto = computeAutoShootCommand(velocity.vx, velocity.vy);
+                state.lastAutoSolution = auto;
+                return {
+                    launchVelocity: auto.velocity,
+                    elevationDeg: auto.elevationDeg,
+                    absoluteAzimuth: auto.absoluteAzimuth,
+                    distance,
+                    bearing,
+                    robotVx: velocity.vx,
+                    robotVy: velocity.vy
+                };
+            }
+
+            state.lastAutoSolution = null;
+            return {
+                launchVelocity: state.velocity,
+                elevationDeg: state.elevation,
+                absoluteAzimuth: bearing + state.azimuth * Math.PI / 180,
+                distance,
+                bearing,
+                robotVx: velocity.vx,
+                robotVy: velocity.vy
+            };
+        }
+
         // ==================== TEST RUNNER ====================
 
         const urlParams = new URLSearchParams(window.location.search);
@@ -719,6 +965,7 @@
                 });
         }
 
+            // Runs in-browser regression tests against deterministic expected values.
         function runTests(testData) {
             const results = [];
             const caseResults = {};  // Store results by name for comparison tests
@@ -977,9 +1224,15 @@
 
             // ==================== STATE ====================
 
-            const state = {
+            // Central mutable simulator state.
+            state = {
                 robotX: ALLIANCE_ZONE_DEPTH / 2,
                 robotY: ALLIANCE_ZONE_WIDTH / 2,
+                robotVx: 0.1,
+                robotVy: 0.1,
+                velocityMotionEnabled: false,
+                wallReflectionEnabled: true,
+                autoShootEnabled: false,
                 velocity: 15.0,
                 elevation: 45.0,
                 azimuth: 0.0,
@@ -992,12 +1245,15 @@
                 hits: 0,
                 lastTrajectory: null,
                 lastHit: null,
+                lastAutoSolution: null,
                 lastMissReason: '',
+                lastFrameTimeMs: null,
                 keysPressed: new Set()
             };
 
             // ==================== UI UPDATES ====================
 
+            // Refreshes sidebar telemetry and autoshoot debug output.
             function updateRobotInfo() {
                 const dx = HUB_X - state.robotX;
                 const dy = HUB_Y - state.robotY;
@@ -1006,8 +1262,11 @@
 
                 document.getElementById('robot-x').textContent = state.robotX.toFixed(2);
                 document.getElementById('robot-y').textContent = state.robotY.toFixed(2);
+                document.getElementById('robot-vx').textContent = state.robotVx.toFixed(2);
+                document.getElementById('robot-vy').textContent = state.robotVy.toFixed(2);
                 document.getElementById('optimal-distance').textContent = distance.toFixed(2);
                 document.getElementById('optimal-bearing').textContent = bearing.toFixed(1);
+                document.getElementById('shot-mode').textContent = state.autoShootEnabled ? 'AutoShoot' : 'Manual';
 
                 const hitRate = state.totalShots > 0 ? (state.hits / state.totalShots * 100).toFixed(1) : 0;
                 document.getElementById('shot-counter').textContent = `${state.hits}/${state.totalShots} (${hitRate}%)`;
@@ -1017,23 +1276,41 @@
                 } else {
                     document.getElementById('miss-reason-display').textContent = '';
                 }
+
+                const debugElement = document.getElementById('autoshoot-debug');
+                if (!state.autoShootEnabled || !state.lastAutoSolution) {
+                    debugElement.textContent = 'AutoShoot disabled.';
+                } else {
+                    const s = state.lastAutoSolution;
+                    debugElement.textContent =
+                        `robot_vx=${s.robotVx.toFixed(3)} m/s\n`
+                        + `robot_vy=${s.robotVy.toFixed(3)} m/s\n`
+                        + `x_hub=${s.xHubDistance.toFixed(3)} m\n`
+                        + `y_hub=${s.yHubDistance.toFixed(3)} m\n`
+                        + `dist_hub=${s.totalHubDist.toFixed(3)} m\n`
+                        + `flight_time=${s.flightTime.toFixed(3)} s\n`
+                        + `target_x=${s.targetXLocation.toFixed(3)} m\n`
+                        + `target_y=${s.targetYLocation.toFixed(3)} m\n`
+                        + `target_dist=${s.targetDist.toFixed(3)} m\n`
+                        + `launch_v=${s.velocity.toFixed(3)} m/s\n`
+                        + `hood_init=${s.initialHoodAngleDeg.toFixed(3)} deg\n`
+                        + `hood_final=${s.elevationDeg.toFixed(3)} deg\n`
+                        + `turret=${s.turretAngleDeg.toFixed(3)} deg`;
+                }
             }
 
+            // Recomputes and redraws the cyan preview line using current command + state.
             function updatePreview() {
-                const dx = HUB_X - state.robotX;
-                const dy = HUB_Y - state.robotY;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                const bearing = Math.atan2(dy, dx);
-
-                const absoluteAzimuth = bearing + state.azimuth * Math.PI / 180;
+                const shot = getShotCommand();
 
                 const result = computeTrajectory3DMoving(
-                    state.velocity,
-                    state.elevation * Math.PI / 180,
-                    absoluteAzimuth,
-                    distance,
-                    bearing,
-                    0, 0,
+                    shot.launchVelocity,
+                    shot.elevationDeg * Math.PI / 180,
+                    shot.absoluteAzimuth,
+                    shot.distance,
+                    shot.bearing,
+                    shot.robotVx,
+                    shot.robotVy,
                     0.001,
                     state.airResistance,
                     state.dragCoeff,
@@ -1056,15 +1333,15 @@
                 previewGeometry.attributes.position.needsUpdate = true;
 
                 // Update barrel orientation
-                barrel.rotation.z = -state.elevation * Math.PI / 180;
-                const elevRad = state.elevation * Math.PI / 180;
+                barrel.rotation.z = -shot.elevationDeg * Math.PI / 180;
+                const elevRad = shot.elevationDeg * Math.PI / 180;
                 barrel.position.set(
                     Math.sin(elevRad) * 0.15,
                     Math.cos(elevRad) * 0.15,
                     0
                 );
 
-                robot.rotation.y = absoluteAzimuth;
+                robot.rotation.y = shot.absoluteAzimuth;
 
                 // Update bearing line
                 const bearingPos = bearingGeometry.attributes.position.array;
@@ -1080,22 +1357,20 @@
                 updateRobotInfo();
             }
 
+            // Fires one shot, records hit/miss statistics, and starts trajectory animation.
             function fireShot() {
                 if (state.firing) return;
 
-                const dx = HUB_X - state.robotX;
-                const dy = HUB_Y - state.robotY;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                const bearing = Math.atan2(dy, dx);
-                const absoluteAzimuth = bearing + state.azimuth * Math.PI / 180;
+                const shot = getShotCommand();
 
                 const result = computeTrajectory3DMoving(
-                    state.velocity,
-                    state.elevation * Math.PI / 180,
-                    absoluteAzimuth,
-                    distance,
-                    bearing,
-                    0, 0,
+                    shot.launchVelocity,
+                    shot.elevationDeg * Math.PI / 180,
+                    shot.absoluteAzimuth,
+                    shot.distance,
+                    shot.bearing,
+                    shot.robotVx,
+                    shot.robotVy,
                     0.001,
                     state.airResistance,
                     state.dragCoeff,
@@ -1142,6 +1417,7 @@
                 updateStatusIndicator();
             }
 
+            // Updates top-bar status indicator: Ready / HIT / MISS.
             function updateStatusIndicator() {
                 const statusDot = document.querySelector('.status-dot');
                 const statusText = document.getElementById('status-text');
@@ -1158,11 +1434,24 @@
                 }
             }
 
+            // Re-centers robot in alliance zone and refreshes preview solution.
             function resetRobotPosition() {
                 state.robotX = ALLIANCE_ZONE_DEPTH / 2;
                 state.robotY = ALLIANCE_ZONE_WIDTH / 2;
                 robot.position.set(state.robotX, 0.125, state.robotY);
                 updatePreview();
+            }
+
+            // Disables manual aim controls while autoshoot is active to avoid conflicting inputs.
+            function updateManualControlsState() {
+                const manualSection = document.getElementById('manual-controls-section');
+                const isDisabled = state.autoShootEnabled;
+
+                document.getElementById('velocity-slider').disabled = isDisabled;
+                document.getElementById('elevation-slider').disabled = isDisabled;
+                document.getElementById('azimuth-slider').disabled = isDisabled;
+
+                manualSection.classList.toggle('disabled', isDisabled);
             }
 
             // ==================== EVENT HANDLERS ====================
@@ -1184,6 +1473,40 @@
             document.getElementById('azimuth-slider').addEventListener('input', (e) => {
                 state.azimuth = parseFloat(e.target.value);
                 document.getElementById('azimuth-value').textContent = state.azimuth.toFixed(1);
+                previewMaterial.color.setHex(0x00ffff);
+                updatePreview();
+            });
+
+            document.getElementById('robot-vx-slider').addEventListener('input', (e) => {
+                state.robotVx = parseFloat(e.target.value);
+                document.getElementById('robot-vx-value').textContent = state.robotVx.toFixed(1);
+                previewMaterial.color.setHex(0x00ffff);
+                updatePreview();
+            });
+
+            document.getElementById('robot-vy-slider').addEventListener('input', (e) => {
+                state.robotVy = parseFloat(e.target.value);
+                document.getElementById('robot-vy-value').textContent = state.robotVy.toFixed(1);
+                previewMaterial.color.setHex(0x00ffff);
+                updatePreview();
+            });
+
+            document.getElementById('velocity-motion-checkbox').addEventListener('change', (e) => {
+                state.velocityMotionEnabled = e.target.checked;
+                if (state.velocityMotionEnabled) {
+                    state.keysPressed.clear();
+                }
+                previewMaterial.color.setHex(0x00ffff);
+                updatePreview();
+            });
+
+            document.getElementById('wall-reflection-checkbox').addEventListener('change', (e) => {
+                state.wallReflectionEnabled = e.target.checked;
+            });
+
+            document.getElementById('autoshoot-checkbox').addEventListener('change', (e) => {
+                state.autoShootEnabled = e.target.checked;
+                updateManualControlsState();
                 previewMaterial.color.setHex(0x00ffff);
                 updatePreview();
             });
@@ -1237,28 +1560,79 @@
 
             // ==================== ANIMATION LOOP ====================
 
+            // Per-frame loop: integrates robot motion, handles reflection/manual driving,
+            // animates fired ball, and renders scene.
             function animate() {
                 requestAnimationFrame(animate);
+
+                const nowMs = performance.now();
+                const dtFrame = state.lastFrameTimeMs === null
+                    ? 1.0 / 60.0
+                    : Math.min(0.05, (nowMs - state.lastFrameTimeMs) / 1000.0);
+                state.lastFrameTimeMs = nowMs;
 
                 // Handle movement keys
                 const moveSpeed = 0.05;
                 let moved = false;
 
-                if (state.keysPressed.has('w') || state.keysPressed.has('arrowup')) {
-                    state.robotX = Math.min(state.robotX + moveSpeed, ALLIANCE_ZONE_DEPTH - 0.1);
+                if (state.velocityMotionEnabled) {
+                    state.robotX += state.robotVx * dtFrame;
+                    state.robotY += state.robotVy * dtFrame;
+
+                    const xMin = 0.1;
+                    const xMax = ALLIANCE_ZONE_DEPTH - 0.1;
+                    const yMin = 0.1;
+                    const yMax = ALLIANCE_ZONE_WIDTH - 0.1;
+
+                    if (state.wallReflectionEnabled) {
+                        if (state.robotX <= xMin) {
+                            state.robotX = xMin;
+                            state.robotVx = Math.abs(state.robotVx);
+                            document.getElementById('robot-vx-slider').value = state.robotVx.toFixed(1);
+                            document.getElementById('robot-vx-value').textContent = state.robotVx.toFixed(1);
+                        } else if (state.robotX >= xMax) {
+                            state.robotX = xMax;
+                            state.robotVx = -Math.abs(state.robotVx);
+                            document.getElementById('robot-vx-slider').value = state.robotVx.toFixed(1);
+                            document.getElementById('robot-vx-value').textContent = state.robotVx.toFixed(1);
+                        }
+
+                        if (state.robotY <= yMin) {
+                            state.robotY = yMin;
+                            state.robotVy = Math.abs(state.robotVy);
+                            document.getElementById('robot-vy-slider').value = state.robotVy.toFixed(1);
+                            document.getElementById('robot-vy-value').textContent = state.robotVy.toFixed(1);
+                        } else if (state.robotY >= yMax) {
+                            state.robotY = yMax;
+                            state.robotVy = -Math.abs(state.robotVy);
+                            document.getElementById('robot-vy-slider').value = state.robotVy.toFixed(1);
+                            document.getElementById('robot-vy-value').textContent = state.robotVy.toFixed(1);
+                        }
+                    } else {
+                        state.robotX = clamp(state.robotX, xMin, xMax);
+                        state.robotY = clamp(state.robotY, yMin, yMax);
+                    }
+
                     moved = true;
                 }
-                if (state.keysPressed.has('s') || state.keysPressed.has('arrowdown')) {
-                    state.robotX = Math.max(state.robotX - moveSpeed, 0.1);
-                    moved = true;
-                }
-                if (state.keysPressed.has('a') || state.keysPressed.has('arrowleft')) {
-                    state.robotY = Math.max(state.robotY - moveSpeed, 0.1);
-                    moved = true;
-                }
-                if (state.keysPressed.has('d') || state.keysPressed.has('arrowright')) {
-                    state.robotY = Math.min(state.robotY + moveSpeed, ALLIANCE_ZONE_WIDTH - 0.1);
-                    moved = true;
+
+                if (!state.velocityMotionEnabled) {
+                    if (state.keysPressed.has('w') || state.keysPressed.has('arrowup')) {
+                        state.robotX = Math.min(state.robotX + moveSpeed, ALLIANCE_ZONE_DEPTH - 0.1);
+                        moved = true;
+                    }
+                    if (state.keysPressed.has('s') || state.keysPressed.has('arrowdown')) {
+                        state.robotX = Math.max(state.robotX - moveSpeed, 0.1);
+                        moved = true;
+                    }
+                    if (state.keysPressed.has('a') || state.keysPressed.has('arrowleft')) {
+                        state.robotY = Math.max(state.robotY - moveSpeed, 0.1);
+                        moved = true;
+                    }
+                    if (state.keysPressed.has('d') || state.keysPressed.has('arrowright')) {
+                        state.robotY = Math.min(state.robotY + moveSpeed, ALLIANCE_ZONE_WIDTH - 0.1);
+                        moved = true;
+                    }
                 }
 
                 if (moved) {
@@ -1303,6 +1677,7 @@
 
             // Initialize
             robot.position.set(state.robotX, 0.125, state.robotY);
+            updateManualControlsState();
             updatePreview();
             animate();
         }
