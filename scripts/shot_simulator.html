@@ -447,8 +447,8 @@
         const HUB_X = HUB_DISTANCE_FROM_WALL;
         const HUB_Y = ALLIANCE_ZONE_WIDTH / 2;
 
-        const SHOOTER_MIN_LAUNCH_SPEED = 10.0;
-        const SHOOTER_MAX_LAUNCH_SPEED = 25.0;
+        const SHOOTER_MIN_LAUNCH_SPEED = 5.0;
+        const SHOOTER_MAX_LAUNCH_SPEED = 15.0;
         const SHOOTER_MIN_ANGLE = 60.0;
         const SHOOTER_MAX_ANGLE = 80.0;
         const MAX_DISTANCE_TO_HUB = 9.2;
@@ -889,7 +889,7 @@
 
             const targetXLocation = xHubDistance - robotVx * flightTime;
             const targetYLocation = yHubDistance - robotVy * flightTime;
-            const targetDist = Math.hypot(targetXLocation, targetYLocation);
+            const targetDist = Math.hypot(targetXLocation, targetYLocation) + (0.3 * flightTime);
 
             const turretAngleDeg = Math.atan2(targetYLocation, targetXLocation) * 180 / Math.PI;
             const finalHoodAngleDeg = getFinalHoodAngleShooterUtils(targetDist, shooterLaunchSpeed, flightTime);
