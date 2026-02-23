@@ -46,6 +46,25 @@
             font-size: 18px;
         }
 
+        #hit-counter-display {
+            display: flex;
+            gap: 16px;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        #hit-counter-display .hits {
+            color: #00ff66;
+        }
+
+        #hit-counter-display .misses {
+            color: #ff4444;
+        }
+
+        #hit-counter-display .rate {
+            color: #ffcc00;
+        }
+
         #sidebar {
             position: fixed;
             top: 60px;
@@ -263,11 +282,6 @@
             font-weight: 600;
         }
 
-        .miss-reason {
-            font-size: 11px;
-            color: #ff6666;
-            margin-top: 4px;
-        }
     </style>
 </head>
 <body>
@@ -275,6 +289,11 @@
 
     <div id="top-bar" class="overlay">
         <div class="title">FRC Ball Shooter Simulator</div>
+        <div id="hit-counter-display">
+            <span class="hits">Hits: <span id="hc-hits">0</span></span>
+            <span class="misses">Miss: <span id="hc-misses">0</span></span>
+            <span class="rate"><span id="hc-rate">0</span>%</span>
+        </div>
         <div id="hit-status" class="status-indicator">
             <span class="status-dot neutral"></span>
             <span id="status-text">Ready</span>
@@ -375,7 +394,6 @@
             <div class="info-line">Bearing: <span id="optimal-bearing">--</span> deg</div>
             <div class="info-line">Shot Mode: <span id="shot-mode">Manual</span></div>
             <div class="info-line">Shots: <span id="shot-counter">0/0 (0%)</span></div>
-            <div id="miss-reason-display" class="miss-reason"></div>
         </div>
 
         <div class="section">
@@ -386,7 +404,7 @@
         <div class="section">
             <div class="section-title">Controls</div>
             <div class="info-line">WASD/Arrows: Move robot (manual mode)</div>
-            <div class="info-line">Space: Fire shot (auto if enabled)</div>
+            <div class="info-line">Space: Fire shot (manual mode only)</div>
             <div class="info-line">R: Reset position</div>
         </div>
 
@@ -420,7 +438,7 @@
         //      velocity inheritance, then evaluates hub entry/wall collisions.
         // 3) Presentation layer:
         //    - updatePreview() redraws the predicted path and robot aiming pose.
-        //    - fireShot() animates a sampled trajectory and updates hit/miss stats.
+        //    - spawnBall() launches a ball from the pool; hit/miss detected during animation.
         // 4) Runtime loop:
         //    - animate() advances robot motion (manual or velocity+bounce), refreshes preview,
         //      and renders the scene.
@@ -1215,13 +1233,18 @@
 
             scene.add(robot);
 
-            // Ball
+            // Ball pool (12 meshes for concurrent balls at 8/sec)
+            const BALL_POOL_SIZE = 12;
+            const ballPool = [];
             const ballGeometry = new THREE.SphereGeometry(0.075, 16, 16);
-            const ballMaterial = new THREE.MeshLambertMaterial({ color: 0xff6600 });
-            const ball = new THREE.Mesh(ballGeometry, ballMaterial);
-            ball.visible = false;
-            ball.castShadow = true;
-            scene.add(ball);
+            for (let i = 0; i < BALL_POOL_SIZE; i++) {
+                const mat = new THREE.MeshLambertMaterial({ color: 0xff6600, transparent: true, opacity: 1.0 });
+                const b = new THREE.Mesh(ballGeometry, mat);
+                b.visible = false;
+                b.castShadow = true;
+                scene.add(b);
+                ballPool.push(b);
+            }
 
             // Trajectory preview line (pre-allocated)
             const maxPoints = 600;
@@ -1265,14 +1288,11 @@
                 airResistance: true,
                 dragCoeff: DRAG_COEFFICIENT_DEFAULT,
                 ballMass: BALL_MASS_DEFAULT,
-                firing: false,
-                fireProgress: 0,
                 totalShots: 0,
                 hits: 0,
-                lastTrajectory: null,
-                lastHit: null,
+                activeBalls: [],
+                lastShotTimeMs: 0,
                 lastAutoSolution: null,
-                lastMissReason: '',
                 lastFrameTimeMs: null,
                 keysPressed: new Set()
             };
@@ -1296,12 +1316,6 @@
 
                 const hitRate = state.totalShots > 0 ? (state.hits / state.totalShots * 100).toFixed(1) : 0;
                 document.getElementById('shot-counter').textContent = `${state.hits}/${state.totalShots} (${hitRate}%)`;
-
-                if (state.lastMissReason) {
-                    document.getElementById('miss-reason-display').textContent = state.lastMissReason;
-                } else {
-                    document.getElementById('miss-reason-display').textContent = '';
-                }
 
                 const debugElement = document.getElementById('autoshoot-debug');
                 if (!state.autoShootEnabled || !state.lastAutoSolution) {
@@ -1384,8 +1398,11 @@
             }
 
             // Fires one shot, records hit/miss statistics, and starts trajectory animation.
-            function fireShot() {
-                if (state.firing) return;
+            function spawnBall() {
+                // Find an available mesh from the pool
+                const usedMeshes = new Set(state.activeBalls.map(b => b.mesh));
+                const availableMesh = ballPool.find(m => !usedMeshes.has(m));
+                if (!availableMesh) return; // pool exhausted
 
                 const shot = getShotCommand();
 
@@ -1403,61 +1420,73 @@
                     state.ballMass
                 );
 
-                state.lastTrajectory = result;
-                state.lastHit = result.hit;
-                state.lastMissReason = result.miss_reason || '';
+                availableMesh.material.opacity = 1.0;
+                availableMesh.visible = true;
+
+                state.activeBalls.push({
+                    mesh: availableMesh,
+                    trajectory: { x: result.trajectory_x, y: result.trajectory_y, z: result.trajectory_z },
+                    robotXAtFire: state.robotX,
+                    robotYAtFire: state.robotY,
+                    progress: 0,
+                    status: 'flying',
+                    hitDetected: false,
+                    missDetected: false,
+                    fadeStartTimeMs: null
+                });
+
                 state.totalShots++;
-                if (result.hit) state.hits++;
-
-                state.firing = true;
-                state.fireProgress = 0;
-
-                // Change preview line color
-                if (result.hit) {
-                    previewMaterial.color.setHex(0x00cc44);
-                    ring.material.color.setHex(0x00cc44);
-                } else {
-                    previewMaterial.color.setHex(0xcc2200);
-                    ring.material.color.setHex(0xcc2200);
-                }
-
-                // Show landing marker
-                if (result.trajectory_x.length > 0) {
-                    let descIdx = -1;
-                    for (let i = 1; i < result.trajectory_z.length; i++) {
-                        if (result.trajectory_z[i - 1] >= HUB_OPENING_HEIGHT && result.trajectory_z[i] < HUB_OPENING_HEIGHT) {
-                            descIdx = i;
-                            break;
-                        }
-                    }
-                    if (descIdx > 0) {
-                        const landX = state.robotX + result.trajectory_x[descIdx];
-                        const landY = state.robotY + result.trajectory_y[descIdx];
-                        landingMarker.position.set(landX, HUB_OPENING_HEIGHT, landY);
-                        landingMarker.material.color.setHex(result.hit ? 0x00cc44 : 0xcc2200);
-                        landingMarker.visible = true;
-                    }
-                }
-
                 updateRobotInfo();
-                updateStatusIndicator();
             }
 
-            // Updates top-bar status indicator: Ready / HIT / MISS.
-            function updateStatusIndicator() {
+            // Physics-based hit detection during animation
+            function checkBallHit(ab, prevX, prevY, prevZ, curX, curY, curZ) {
+                const fx = ab.robotXAtFire + curX, fy = ab.robotYAtFire + curY, fz = curZ;
+                const pfx = ab.robotXAtFire + prevX, pfy = ab.robotYAtFire + prevY, pfz = prevZ;
+
+                // Descending through hub opening height
+                if (pfz >= HUB_OPENING_HEIGHT && fz < HUB_OPENING_HEIGHT) {
+                    const dz = pfz - fz;
+                    const f = dz > 0 ? (pfz - HUB_OPENING_HEIGHT) / dz : 0;
+                    const cx = pfx + f * (fx - pfx), cy = pfy + f * (fy - pfy);
+                    const dist = Math.sqrt((cx - HUB_X) ** 2 + (cy - HUB_Y) ** 2);
+                    return dist <= (HUB_OPENING_HALF_WIDTH - BALL_RADIUS) ? 'hit' : 'miss';
+                }
+
+                // Wall collision: enters hub radius below opening
+                const dist = Math.sqrt((fx - HUB_X) ** 2 + (fy - HUB_Y) ** 2);
+                const prevDist = Math.sqrt((pfx - HUB_X) ** 2 + (pfy - HUB_Y) ** 2);
+                if (prevDist > HUB_OPENING_HALF_WIDTH && dist <= HUB_OPENING_HALF_WIDTH && fz < HUB_OPENING_HEIGHT) {
+                    return 'miss';
+                }
+
+                // Ground or out of bounds
+                if (fz <= 0 || fx > HUB_X + 3 || fx < -1 || fy < -1 || fy > ALLIANCE_ZONE_WIDTH + 1) {
+                    return 'miss';
+                }
+
+                return null; // still flying
+            }
+
+            // Updates top-bar status indicator and hit counter on hit or miss.
+            function updateStatusHit(isHit) {
                 const statusDot = document.querySelector('.status-dot');
                 const statusText = document.getElementById('status-text');
 
-                if (state.lastHit === null) {
-                    statusDot.className = 'status-dot neutral';
-                    statusText.textContent = 'Ready';
-                } else if (state.lastHit) {
+                if (isHit) {
                     statusDot.className = 'status-dot hit';
                     statusText.textContent = 'HIT';
                 } else {
                     statusDot.className = 'status-dot miss';
                     statusText.textContent = 'MISS';
                 }
+
+                // Update on-screen hit counter
+                const misses = state.totalShots - state.hits;
+                document.getElementById('hc-hits').textContent = state.hits;
+                document.getElementById('hc-misses').textContent = misses;
+                const rate = state.totalShots > 0 ? (state.hits / state.totalShots * 100).toFixed(1) : '0';
+                document.getElementById('hc-rate').textContent = rate;
             }
 
             // Re-centers robot in alliance zone and refreshes preview solution.
@@ -1566,7 +1595,7 @@
 
                 if (e.key === ' ') {
                     e.preventDefault();
-                    fireShot();
+                    if (!state.autoShootEnabled) spawnBall();
                 } else if (e.key.toLowerCase() === 'r') {
                     resetRobotPosition();
                 } else if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(e.key.toLowerCase())) {
@@ -1587,7 +1616,7 @@
             // ==================== ANIMATION LOOP ====================
 
             // Per-frame loop: integrates robot motion, handles reflection/manual driving,
-            // animates fired ball, and renders scene.
+            // spawns auto-shoot balls, animates all active balls with hit detection, and renders scene.
             function animate() {
                 requestAnimationFrame(animate);
 
@@ -1668,32 +1697,80 @@
                     updatePreview();
                 }
 
-                // Animate ball during firing
-                if (state.firing) {
-                    state.fireProgress += 0.015;
+                // Auto-shoot: spawn ball every 125ms (8/sec)
+                if (state.autoShootEnabled && nowMs - state.lastShotTimeMs >= 125) {
+                    spawnBall();
+                    state.lastShotTimeMs = nowMs;
+                }
 
-                    if (state.fireProgress >= 1.0) {
-                        state.firing = false;
-                        state.fireProgress = 0;
-                        ball.visible = false;
+                // Animate all active balls
+                const FADE_DURATION_MS = 500;
+                const lerp = (a, b, t) => a + (b - a) * t;
 
-                        // Flash hub ring
-                        setTimeout(() => {
-                            ring.material.color.setHex(0xff8800);
-                        }, 300);
-                    } else {
-                        const traj = state.lastTrajectory;
-                        const idx = Math.floor(state.fireProgress * (traj.trajectory_x.length - 1));
-                        const frac = state.fireProgress * (traj.trajectory_x.length - 1) - idx;
-                        const next = Math.min(idx + 1, traj.trajectory_x.length - 1);
+                for (let i = state.activeBalls.length - 1; i >= 0; i--) {
+                    const ab = state.activeBalls[i];
+                    const traj = ab.trajectory;
 
-                        const lerp = (a, b, t) => a + (b - a) * t;
-                        const x = lerp(traj.trajectory_x[idx], traj.trajectory_x[next], frac);
-                        const y = lerp(traj.trajectory_y[idx], traj.trajectory_y[next], frac);
-                        const z = lerp(traj.trajectory_z[idx], traj.trajectory_z[next], frac);
+                    if (ab.status === 'flying') {
+                        // Save previous position for hit detection
+                        const prevIdx = Math.floor(ab.progress * (traj.x.length - 1));
+                        const prevFrac = ab.progress * (traj.x.length - 1) - prevIdx;
+                        const prevNext = Math.min(prevIdx + 1, traj.x.length - 1);
+                        const prevX = lerp(traj.x[prevIdx], traj.x[prevNext], prevFrac);
+                        const prevY = lerp(traj.y[prevIdx], traj.y[prevNext], prevFrac);
+                        const prevZ = lerp(traj.z[prevIdx], traj.z[prevNext], prevFrac);
 
-                        ball.position.set(state.robotX + x, z, state.robotY + y);
-                        ball.visible = true;
+                        // Advance progress
+                        ab.progress += 0.015;
+
+                        if (ab.progress >= 1.0) {
+                            // Trajectory ended without detection — count as miss
+                            ab.status = 'fading';
+                            ab.fadeStartTimeMs = nowMs;
+                            updateStatusHit(false);
+                        } else {
+                            const idx = Math.floor(ab.progress * (traj.x.length - 1));
+                            const frac = ab.progress * (traj.x.length - 1) - idx;
+                            const next = Math.min(idx + 1, traj.x.length - 1);
+                            const curX = lerp(traj.x[idx], traj.x[next], frac);
+                            const curY = lerp(traj.y[idx], traj.y[next], frac);
+                            const curZ = lerp(traj.z[idx], traj.z[next], frac);
+
+                            // Position ball in Three.js coords (fieldX→X, fieldZ→Y, fieldY→Z)
+                            ab.mesh.position.set(
+                                ab.robotXAtFire + curX,
+                                curZ,
+                                ab.robotYAtFire + curY
+                            );
+
+                            // Physics-based hit detection
+                            const hitResult = checkBallHit(ab, prevX, prevY, prevZ, curX, curY, curZ);
+                            if (hitResult === 'hit') {
+                                state.hits++;
+                                ab.status = 'fading';
+                                ab.fadeStartTimeMs = nowMs;
+                                ab.mesh.material.color.setHex(0x00ff00);
+                                updateStatusHit(true);
+                                updateRobotInfo();
+                            } else if (hitResult === 'miss') {
+                                ab.status = 'fading';
+                                ab.fadeStartTimeMs = nowMs;
+                                ab.mesh.material.color.setHex(0xff0000);
+                                updateStatusHit(false);
+                            }
+                        }
+                    } else if (ab.status === 'fading') {
+                        const elapsed = nowMs - ab.fadeStartTimeMs;
+                        if (elapsed >= FADE_DURATION_MS) {
+                            // Recycle mesh back to pool
+                            ab.mesh.visible = false;
+                            ab.mesh.material.opacity = 1.0;
+                            ab.mesh.material.color.setHex(0xff6600);
+                            ab.status = 'done';
+                            state.activeBalls.splice(i, 1);
+                        } else {
+                            ab.mesh.material.opacity = 1.0 - (elapsed / FADE_DURATION_MS);
+                        }
                     }
                 }
 
