@@ -683,6 +683,8 @@
             const max_time = 5.0;
             let t = 0.0;
 
+            //console.trace(); 
+
             while (t < max_time && z >= 0) {
                 if (air_resistance) {
                     const v_mag = Math.sqrt(vx * vx + vy * vy + vz * vz);
@@ -1290,6 +1292,8 @@
                 ballMass: BALL_MASS_DEFAULT,
                 totalShots: 0,
                 hits: 0,
+                misses: 0,
+                totalCenterDist: 0,
                 activeBalls: [],
                 lastShotTimeMs: 0,
                 lastAutoSolution: null,
@@ -1305,6 +1309,8 @@
                 const dy = HUB_Y - state.robotY;
                 const distance = Math.sqrt(dx * dx + dy * dy);
                 const bearing = Math.atan2(dy, dx) * 180 / Math.PI;
+
+                //console.log(state)
 
                 document.getElementById('robot-x').textContent = state.robotX.toFixed(2);
                 document.getElementById('robot-y').textContent = state.robotY.toFixed(2);
@@ -1322,6 +1328,7 @@
                     debugElement.textContent = 'AutoShoot disabled.';
                 } else {
                     const s = state.lastAutoSolution;
+                    const avgCenterDist = state.hits > 0 ? (state.totalCenterDist / state.hits) : 0;
                     debugElement.textContent =
                         `robot_vx=${s.robotVx.toFixed(3)} m/s\n`
                         + `robot_vy=${s.robotVy.toFixed(3)} m/s\n`
@@ -1335,7 +1342,8 @@
                         + `launch_v=${s.velocity.toFixed(3)} m/s\n`
                         + `hood_init=${s.initialHoodAngleDeg.toFixed(3)} deg\n`
                         + `hood_final=${s.elevationDeg.toFixed(3)} deg\n`
-                        + `turret=${s.turretAngleDeg.toFixed(3)} deg`;
+                        + `turret=${s.turretAngleDeg.toFixed(3)} deg\n`
+                        + `avg_center_dist=${avgCenterDist.toFixed(3)} m\n`;
                 }
             }
 
@@ -1450,19 +1458,20 @@
                     const f = dz > 0 ? (pfz - HUB_OPENING_HEIGHT) / dz : 0;
                     const cx = pfx + f * (fx - pfx), cy = pfy + f * (fy - pfy);
                     const dist = Math.sqrt((cx - HUB_X) ** 2 + (cy - HUB_Y) ** 2);
-                    return dist <= (HUB_OPENING_HALF_WIDTH - BALL_RADIUS) ? 'hit' : 'miss';
+                    const isHit = dist <= (HUB_OPENING_HALF_WIDTH - BALL_RADIUS);
+                    return { result: isHit ? 'hit' : 'miss', centerDist: dist };
                 }
 
                 // Wall collision: enters hub radius below opening
                 const dist = Math.sqrt((fx - HUB_X) ** 2 + (fy - HUB_Y) ** 2);
                 const prevDist = Math.sqrt((pfx - HUB_X) ** 2 + (pfy - HUB_Y) ** 2);
                 if (prevDist > HUB_OPENING_HALF_WIDTH && dist <= HUB_OPENING_HALF_WIDTH && fz < HUB_OPENING_HEIGHT) {
-                    return 'miss';
+                    return { result: 'miss', centerDist: null };
                 }
 
                 // Ground or out of bounds
                 if (fz <= 0 || fx > HUB_X + 3 || fx < -1 || fy < -1 || fy > ALLIANCE_ZONE_WIDTH + 1) {
-                    return 'miss';
+                    return { result: 'miss', centerDist: null };
                 }
 
                 return null; // still flying
@@ -1479,13 +1488,14 @@
                 } else {
                     statusDot.className = 'status-dot miss';
                     statusText.textContent = 'MISS';
+                    state.misses++;
                 }
 
                 // Update on-screen hit counter
-                const misses = state.totalShots - state.hits;
                 document.getElementById('hc-hits').textContent = state.hits;
-                document.getElementById('hc-misses').textContent = misses;
-                const rate = state.totalShots > 0 ? (state.hits / state.totalShots * 100).toFixed(1) : '0';
+                document.getElementById('hc-misses').textContent = state.misses;
+                const completed = state.hits + state.misses;
+                const rate = completed > 0 ? (state.hits / completed * 100).toFixed(1) : '0';
                 document.getElementById('hc-rate').textContent = rate;
             }
 
@@ -1723,41 +1733,44 @@
                         // Advance progress
                         ab.progress += 0.015;
 
-                        if (ab.progress >= 1.0) {
+                        // Calculate current position
+                        const idx = Math.floor(ab.progress * (traj.x.length - 1));
+                        const frac = ab.progress * (traj.x.length - 1) - idx;
+                        const next = Math.min(idx + 1, traj.x.length - 1);
+                        const curX = lerp(traj.x[idx], traj.x[next], frac);
+                        const curY = lerp(traj.y[idx], traj.y[next], frac);
+                        const curZ = lerp(traj.z[idx], traj.z[next], frac);
+
+                        // Position ball in Three.js coords (fieldX→X, fieldZ→Y, fieldY→Z)
+                        ab.mesh.position.set(
+                            ab.robotXAtFire + curX,
+                            curZ,
+                            ab.robotYAtFire + curY
+                        );
+
+                        // Physics-based hit detection (check before marking as trajectory complete)
+                        const hitResult = checkBallHit(ab, prevX, prevY, prevZ, curX, curY, curZ);
+                        if (hitResult && hitResult.result === 'hit') {
+                            state.hits++;
+                            // Accumulate center distance from exact crossing point
+                            if (hitResult.centerDist !== null) {
+                                state.totalCenterDist += hitResult.centerDist;
+                            }
+                            ab.status = 'fading';
+                            ab.fadeStartTimeMs = nowMs;
+                            ab.mesh.material.color.setHex(0x00ff00);
+                            updateStatusHit(true);
+                            updateRobotInfo();
+                        } else if (hitResult && hitResult.result === 'miss') {
+                            ab.status = 'fading';
+                            ab.fadeStartTimeMs = nowMs;
+                            ab.mesh.material.color.setHex(0xff0000);
+                            updateStatusHit(false);
+                        } else if (ab.progress >= 1.0) {
                             // Trajectory ended without detection — count as miss
                             ab.status = 'fading';
                             ab.fadeStartTimeMs = nowMs;
                             updateStatusHit(false);
-                        } else {
-                            const idx = Math.floor(ab.progress * (traj.x.length - 1));
-                            const frac = ab.progress * (traj.x.length - 1) - idx;
-                            const next = Math.min(idx + 1, traj.x.length - 1);
-                            const curX = lerp(traj.x[idx], traj.x[next], frac);
-                            const curY = lerp(traj.y[idx], traj.y[next], frac);
-                            const curZ = lerp(traj.z[idx], traj.z[next], frac);
-
-                            // Position ball in Three.js coords (fieldX→X, fieldZ→Y, fieldY→Z)
-                            ab.mesh.position.set(
-                                ab.robotXAtFire + curX,
-                                curZ,
-                                ab.robotYAtFire + curY
-                            );
-
-                            // Physics-based hit detection
-                            const hitResult = checkBallHit(ab, prevX, prevY, prevZ, curX, curY, curZ);
-                            if (hitResult === 'hit') {
-                                state.hits++;
-                                ab.status = 'fading';
-                                ab.fadeStartTimeMs = nowMs;
-                                ab.mesh.material.color.setHex(0x00ff00);
-                                updateStatusHit(true);
-                                updateRobotInfo();
-                            } else if (hitResult === 'miss') {
-                                ab.status = 'fading';
-                                ab.fadeStartTimeMs = nowMs;
-                                ab.mesh.material.color.setHex(0xff0000);
-                                updateStatusHit(false);
-                            }
                         }
                     } else if (ab.status === 'fading') {
                         const elapsed = nowMs - ab.fadeStartTimeMs;
